@@ -32,6 +32,7 @@ import {
   EVIDENCE_LABELS,
 } from "../analysis/earnings.js";
 import { AllocationSize } from "./AllocationSize.js";
+import { PoolPicker } from "./PoolPicker.js";
 import {
   ContextHelp,
   GettingStarted,
@@ -565,6 +566,7 @@ export default function App() {
                   row={current}
                   rows={rows}
                   select={setSelected}
+                  watch={watch}
                   mode={mode}
                   revision={revision}
                   simulate={() => navigate("simulator")}
@@ -575,6 +577,7 @@ export default function App() {
                   row={current}
                   rows={rows}
                   select={setSelected}
+                  watch={watch}
                   allocationSettings={allocationSettings}
                 />
               )}
@@ -1402,40 +1405,11 @@ function Opportunities({
     </>
   );
 }
-function PoolPicker({
-  row,
-  rows,
-  select,
-}: {
-  row: MarketRow;
-  rows: MarketRow[];
-  select: (id: string) => void;
-}) {
-  return (
-    <select
-      className="pool-picker"
-      aria-label="Selected pool"
-      value={row.snapshot.id}
-      onChange={(e) => select(e.target.value)}
-    >
-      {[...rows]
-        .sort(
-          (a, b) =>
-            (b.snapshot.rewards48hUsd ?? -1) - (a.snapshot.rewards48hUsd ?? -1),
-        )
-        .map((r) => (
-          <option key={r.snapshot.id} value={r.snapshot.id}>
-            {r.snapshot.token0.symbol}/{r.snapshot.token1.symbol} ·{" "}
-            {r.snapshot.chain} · {short(r.snapshot.address)}
-          </option>
-        ))}
-    </select>
-  );
-}
 function Analysis({
   row,
   rows,
   select,
+  watch,
   mode,
   revision,
   simulate: goSim,
@@ -1443,6 +1417,7 @@ function Analysis({
   row: MarketRow;
   rows: MarketRow[];
   select: (s: string) => void;
+  watch: string[];
   mode: Mode;
   revision: string;
   simulate: () => void;
@@ -1510,7 +1485,7 @@ function Analysis({
   return (
     <>
       <div className="pool-selection">
-        <PoolPicker row={row} rows={rows} select={select} />
+        <PoolPicker row={row} rows={rows} select={select} watch={watch} />
         <button className="button primary" onClick={goSim}>
           Simulate allocation →
         </button>
@@ -1770,11 +1745,13 @@ function Simulator({
   row,
   rows,
   select,
+  watch,
   allocationSettings,
 }: {
   row: MarketRow;
   rows: MarketRow[];
   select: (s: string) => void;
+  watch: string[];
   allocationSettings: AllocationSettings;
 }) {
   const [fields, setFields] = useLocal<Record<string, string>>("gc-simulator", {
@@ -1807,7 +1784,7 @@ function Simulator({
   return (
     <>
       <div className="pool-selection">
-        <PoolPicker row={row} rows={rows} select={select} />
+        <PoolPicker row={row} rows={rows} select={select} watch={watch} />
         <Badge>Inputs stay in this browser</Badge>
       </div>
       <div className="simulator-layout">
