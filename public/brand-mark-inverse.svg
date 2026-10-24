@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 76 76" fill="none">
+  <title>Gaugecraft</title>
+  <path
+    d="M64 24V22Q64 10 52 10H28Q12 10 12 26V50Q12 66 28 66H50Q64 66 64 52V41H44"
+    stroke="#d6f4de"
+    stroke-width="8"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M31 40L43 28"
+    stroke="#d6f4de"
+    stroke-width="5.5"
+    stroke-linecap="round"
+  />
+</svg>

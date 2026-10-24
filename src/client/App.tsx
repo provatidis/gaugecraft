@@ -293,14 +293,15 @@ export default function App() {
       <aside className="sidebar">
         <a
           className="brand"
+          aria-label="Gaugecraft markets"
           href="#"
           onClick={(e) => {
             e.preventDefault();
             navigate("markets");
           }}
         >
-          <span className="brand-mark">
-            g<span>↗</span>
+          <span className="brand-mark" aria-hidden="true">
+            <img src={assetUrl("brand-mark-inverse.svg")} alt="" />
           </span>
           <span>
             gaugecraft<small>ALLOCATION RESEARCH</small>
