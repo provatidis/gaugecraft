@@ -126,7 +126,7 @@ const steps: {
   },
   {
     title: "Investigate the source of the APR",
-    text: "In Pool analysis, compare fees, scheduled incentives and allocation together. Read the actual fee-window duration and incentive expiry. Rising APR with falling allocation can be a denominator change, not more revenue.",
+    text: "In Pool analysis, compare fees, scheduled incentives and allocation together. Read Forecast readiness for the exact missing-data checks and UTC gaps. It always uses 48 hours, independently of chart range. Check the actual fee-window duration and incentive expiry. Rising APR with falling allocation can be a denominator change, not more revenue.",
     page: "analysis",
     action: "Open Pool analysis",
   },

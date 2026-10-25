@@ -14,22 +14,9 @@ import {
   percentChange,
   sumKnown,
 } from "./math.js";
+import { historyCoverage, PERSISTENCE_REQUIREMENTS } from "./coverage.js";
+export { historyCoverage } from "./coverage.js";
 export const MODEL = "transparent-v1";
-export function historyCoverage(rows: Snapshot[], end: number) {
-  const samples = rows
-    .filter((s) => s.observedAt <= end && s.observedAt >= end - HORIZON)
-    .sort((a, b) => a.observedAt - b.observedAt);
-  const span = samples.length ? (end - samples[0].observedAt) / HOUR : 0;
-  const maxGap = samples
-    .slice(1)
-    .reduce((m, s, i) => Math.max(m, s.observedAt - samples[i].observedAt), 0);
-  return {
-    samples,
-    span,
-    maxGap,
-    ready: span >= 47.5 && samples.length >= 80 && maxGap <= 75 * 60,
-  };
-}
 export function forecast(snapshot: Snapshot, history: Snapshot[]): Forecast {
   const madeAt = Math.max(snapshot.observedAt, snapshot.retrievedAt);
   // Explicit prediction cutoff. Future or other-pool observations never enter the model.
@@ -59,8 +46,9 @@ export function forecast(snapshot: Snapshot, history: Snapshot[]): Forecast {
     aprCv = cv(aprs);
   const enough =
     ready &&
-    fees.length >= 80 &&
-    snapshot.windowEnd - snapshot.windowStart >= 47 * HOUR;
+    fees.length >= PERSISTENCE_REQUIREMENTS.minPricedFees &&
+    snapshot.windowEnd - snapshot.windowStart >=
+      PERSISTENCE_REQUIREMENTS.minFeeWindowSeconds;
   // Rolling fees overlap: use them for level stability, not independent statistical samples.
   const level = enough
     ? median(

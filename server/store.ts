@@ -198,13 +198,14 @@ export class Store {
     id: string,
     from = 0,
     to = Number.MAX_SAFE_INTEGER,
+    includeRaw = true,
   ): Snapshot[] {
     return this.db
       .prepare(
         "SELECT body,raw_hash FROM snapshots WHERE mode=? AND pool_id=? AND at>=? AND at<=? ORDER BY at",
       )
       .all(mode, id, from, to)
-      .map((r) => this.snapshot(r));
+      .map((r) => this.snapshot(r, includeRaw));
   }
   latestInWindow(
     mode: Mode,

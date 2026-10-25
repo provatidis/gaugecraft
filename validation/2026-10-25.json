@@ -1,0 +1,642 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-10-25T09:31:46.709Z",
+  "publishedAt": "2026-10-25T06:08:07.000Z",
+  "source": "https://gaugecraft.sh/data/live/state.json",
+  "method": "Independent contract reads pinned to each published snapshot block and hash; USD arithmetic recalculated with retained snapshot prices. No collector/database writes.",
+  "limitations": [
+    "Five selected cases are a spot check, not a contract audit or exhaustive pool validation.",
+    "No same-block official frontend USD quote was obtained; price differences with the Aero UI remain possible."
+  ],
+  "cases": [
+    {
+      "label": "Base WETH/USDC",
+      "poolId": "8453:0x4a7af46bc8abc00048c6c7920a1488daf568366c",
+      "pair": "WETH/USDC",
+      "chain": "Base",
+      "block": "53059548",
+      "blockHash": "0x0e31250e16e77090202913b52c35a724390f802864ead10017435f323c380cc0",
+      "observedAt": 1792908443,
+      "retrievedAt": 1792908459,
+      "status": "matched",
+      "checks": [
+        {
+          "name": "pool identity",
+          "published": "0x4a7af46bc8abc00048c6c7920a1488daf568366c",
+          "recalculated": "0x4a7af46bc8abc00048c6c7920a1488daf568366c",
+          "match": true
+        },
+        {
+          "name": "reward manager",
+          "published": "0x623de2a4cb208e8498ae888ec1ec805a105fef48",
+          "recalculated": "0x623de2a4cb208e8498ae888ec1ec805a105fef48",
+          "match": true
+        },
+        {
+          "name": "allocation power",
+          "published": 62650359.606563844,
+          "recalculated": 62650359.606563844,
+          "match": true
+        },
+        {
+          "name": "source window start",
+          "published": 1792735643,
+          "recalculated": 1792735643,
+          "match": true
+        },
+        {
+          "name": "source window end",
+          "published": 1792908443,
+          "recalculated": 1792908443,
+          "match": true
+        },
+        {
+          "name": "cooldown hours",
+          "published": 47,
+          "recalculated": 47,
+          "match": true
+        },
+        {
+          "name": "staked liquidity fraction",
+          "published": 0.986590646960146,
+          "recalculated": 0.986590646960146,
+          "match": true
+        },
+        {
+          "name": "eligible fees USD using retained prices",
+          "published": 30874.775820590177,
+          "recalculated": 30874.775820590177,
+          "match": true
+        },
+        {
+          "name": "incentives USD using retained prices",
+          "published": 0,
+          "recalculated": 0,
+          "match": true
+        },
+        {
+          "name": "pool rewards USD using retained prices",
+          "published": 30874.775820590177,
+          "recalculated": 30874.775820590177,
+          "match": true
+        },
+        {
+          "name": "Stake APR using retained AERO price",
+          "published": 13.273305855506742,
+          "recalculated": 13.273305855506742,
+          "match": true
+        },
+        {
+          "name": "complete incentive schedules",
+          "published": [
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "79532075231481481481481481481481481",
+              "start": 1792630800,
+              "end": 1792803600
+            }
+          ],
+          "recalculated": [
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "79532075231481481481481481481481481",
+              "start": 1792630800,
+              "end": 1792803600
+            }
+          ],
+          "match": true
+        }
+      ],
+      "raw": {
+        "totalSupply": "62650359606563843630468019",
+        "liquidity": "27750076686197775193",
+        "gaugeLiquidity": "27377966111029525205",
+        "windowFee0": "6996653040694597480",
+        "windowFee1": "14868303605",
+        "programs": [
+          {
+            "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+            "rate": "79532075231481481481481481481481481",
+            "start": 1792630800,
+            "end": 1792803600
+          }
+        ]
+      },
+      "priceLimitation": "Uses retained Gaugecraft USD prices; this is not an independent price-oracle or official UI quote check."
+    },
+    {
+      "label": "Base Basic pool",
+      "poolId": "8453:0xdd2a5dac93e62c27fe0a3236d22fcea29e19c62c",
+      "pair": "msUSD/USDC",
+      "chain": "Base",
+      "block": "53059548",
+      "blockHash": "0x0e31250e16e77090202913b52c35a724390f802864ead10017435f323c380cc0",
+      "observedAt": 1792908443,
+      "retrievedAt": 1792908459,
+      "status": "matched",
+      "checks": [
+        {
+          "name": "pool identity",
+          "published": "0xdd2a5dac93e62c27fe0a3236d22fcea29e19c62c",
+          "recalculated": "0xdd2a5dac93e62c27fe0a3236d22fcea29e19c62c",
+          "match": true
+        },
+        {
+          "name": "reward manager",
+          "published": "0x6a8a450e2b4674c662bb332f96708242cd781a2a",
+          "recalculated": "0x6a8a450e2b4674c662bb332f96708242cd781a2a",
+          "match": true
+        },
+        {
+          "name": "allocation power",
+          "published": 8177871.500566896,
+          "recalculated": 8177871.500566896,
+          "match": true
+        },
+        {
+          "name": "source window start",
+          "published": 1792735643,
+          "recalculated": 1792735643,
+          "match": true
+        },
+        {
+          "name": "source window end",
+          "published": 1792908443,
+          "recalculated": 1792908443,
+          "match": true
+        },
+        {
+          "name": "cooldown hours",
+          "published": 47,
+          "recalculated": 47,
+          "match": true
+        },
+        {
+          "name": "staked liquidity fraction",
+          "published": 0.9996623856754728,
+          "recalculated": 0.9996623856754728,
+          "match": true
+        },
+        {
+          "name": "eligible fees USD using retained prices",
+          "published": 15.061960056829173,
+          "recalculated": 15.061960056829172,
+          "match": true
+        },
+        {
+          "name": "incentives USD using retained prices",
+          "published": 2857.142857,
+          "recalculated": 2857.142857,
+          "match": true
+        },
+        {
+          "name": "pool rewards USD using retained prices",
+          "published": 2872.204817056829,
+          "recalculated": 2872.204817056829,
+          "match": true
+        },
+        {
+          "name": "Stake APR using retained AERO price",
+          "published": 9.459626325349262,
+          "recalculated": 9.459626325349262,
+          "match": true
+        },
+        {
+          "name": "complete incentive schedules",
+          "published": [
+            {
+              "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+              "rate": "16534391534391534391534",
+              "start": 1792740600,
+              "end": 1793345400
+            }
+          ],
+          "recalculated": [
+            {
+              "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+              "rate": "16534391534391534391534",
+              "start": 1792740600,
+              "end": 1793345400
+            }
+          ],
+          "match": true
+        }
+      ],
+      "raw": {
+        "totalSupply": "8177871500566895667237469",
+        "liquidity": "166379749836245210",
+        "gaugeLiquidity": "166323577649389254",
+        "windowFee0": "7900206784219164144",
+        "windowFee1": "8109735",
+        "programs": [
+          {
+            "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+            "rate": "16534391534391534391534",
+            "start": 1792740600,
+            "end": 1793345400
+          }
+        ]
+      },
+      "priceLimitation": "Uses retained Gaugecraft USD prices; this is not an independent price-oracle or official UI quote check."
+    },
+    {
+      "label": "Base scheduled incentives",
+      "poolId": "8453:0x41e21950362b1014bc629252ecfff8fca5f1646c",
+      "pair": "USDC/MUc",
+      "chain": "Base",
+      "block": "53059548",
+      "blockHash": "0x0e31250e16e77090202913b52c35a724390f802864ead10017435f323c380cc0",
+      "observedAt": 1792908443,
+      "retrievedAt": 1792908459,
+      "status": "matched",
+      "checks": [
+        {
+          "name": "pool identity",
+          "published": "0x41e21950362b1014bc629252ecfff8fca5f1646c",
+          "recalculated": "0x41e21950362b1014bc629252ecfff8fca5f1646c",
+          "match": true
+        },
+        {
+          "name": "reward manager",
+          "published": "0x262b12f6b39b4a1bea64fd7474fcfb8648c20176",
+          "recalculated": "0x262b12f6b39b4a1bea64fd7474fcfb8648c20176",
+          "match": true
+        },
+        {
+          "name": "allocation power",
+          "published": 14191905.347736657,
+          "recalculated": 14191905.347736659,
+          "match": true
+        },
+        {
+          "name": "source window start",
+          "published": 1792735643,
+          "recalculated": 1792735643,
+          "match": true
+        },
+        {
+          "name": "source window end",
+          "published": 1792908443,
+          "recalculated": 1792908443,
+          "match": true
+        },
+        {
+          "name": "cooldown hours",
+          "published": 47,
+          "recalculated": 47,
+          "match": true
+        },
+        {
+          "name": "staked liquidity fraction",
+          "published": 0.9963755749734965,
+          "recalculated": 0.9963755749734965,
+          "match": true
+        },
+        {
+          "name": "eligible fees USD using retained prices",
+          "published": 4421.145231251063,
+          "recalculated": 4421.145231251063,
+          "match": true
+        },
+        {
+          "name": "incentives USD using retained prices",
+          "published": 2119.3185661805724,
+          "recalculated": 2119.3185661805724,
+          "match": true
+        },
+        {
+          "name": "pool rewards USD using retained prices",
+          "published": 6540.463797431636,
+          "recalculated": 6540.463797431636,
+          "match": true
+        },
+        {
+          "name": "Stake APR using retained AERO price",
+          "published": 12.41271252249124,
+          "recalculated": 12.41271252249124,
+          "match": true
+        },
+        {
+          "name": "complete incentive schedules",
+          "published": [
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "12408105902777777777777777777777777",
+              "start": 1792630800,
+              "end": 1792803600
+            },
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "18100413359788359788359788359788359",
+              "start": 1792702800,
+              "end": 1793307600
+            }
+          ],
+          "recalculated": [
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "12408105902777777777777777777777777",
+              "start": 1792630800,
+              "end": 1792803600
+            },
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "18100413359788359788359788359788359",
+              "start": 1792702800,
+              "end": 1793307600
+            }
+          ],
+          "match": true
+        }
+      ],
+      "raw": {
+        "totalSupply": "14191905347736657559785922",
+        "liquidity": "42973960701088",
+        "gaugeLiquidity": "42818204802435",
+        "windowFee0": "2230537566",
+        "windowFee1": "248180976",
+        "programs": [
+          {
+            "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+            "rate": "12408105902777777777777777777777777",
+            "start": 1792630800,
+            "end": 1792803600
+          },
+          {
+            "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+            "rate": "18100413359788359788359788359788359",
+            "start": 1792702800,
+            "end": 1793307600
+          }
+        ]
+      },
+      "priceLimitation": "Uses retained Gaugecraft USD prices; this is not an independent price-oracle or official UI quote check."
+    },
+    {
+      "label": "Base incentive expiration within 48h",
+      "poolId": "8453:0x880db7dda4407d99508574e680d067d1164b3cfe",
+      "pair": "USDC/SPCXc",
+      "chain": "Base",
+      "block": "53059548",
+      "blockHash": "0x0e31250e16e77090202913b52c35a724390f802864ead10017435f323c380cc0",
+      "observedAt": 1792908443,
+      "retrievedAt": 1792908459,
+      "status": "matched",
+      "checks": [
+        {
+          "name": "pool identity",
+          "published": "0x880db7dda4407d99508574e680d067d1164b3cfe",
+          "recalculated": "0x880db7dda4407d99508574e680d067d1164b3cfe",
+          "match": true
+        },
+        {
+          "name": "reward manager",
+          "published": "0xe1717637e87a9e6170caa73a606db66d4a7d45db",
+          "recalculated": "0xe1717637e87a9e6170caa73a606db66d4a7d45db",
+          "match": true
+        },
+        {
+          "name": "allocation power",
+          "published": 10339149.238294344,
+          "recalculated": 10339149.238294344,
+          "match": true
+        },
+        {
+          "name": "source window start",
+          "published": 1792735643,
+          "recalculated": 1792735643,
+          "match": true
+        },
+        {
+          "name": "source window end",
+          "published": 1792908443,
+          "recalculated": 1792908443,
+          "match": true
+        },
+        {
+          "name": "cooldown hours",
+          "published": 47,
+          "recalculated": 47,
+          "match": true
+        },
+        {
+          "name": "staked liquidity fraction",
+          "published": 0.9976511083847023,
+          "recalculated": 0.9976511083847023,
+          "match": true
+        },
+        {
+          "name": "eligible fees USD using retained prices",
+          "published": 3429.791457282327,
+          "recalculated": 3429.791457282327,
+          "match": true
+        },
+        {
+          "name": "incentives USD using retained prices",
+          "published": 1278.905548823158,
+          "recalculated": 1278.905548823158,
+          "match": true
+        },
+        {
+          "name": "pool rewards USD using retained prices",
+          "published": 4708.697006105485,
+          "recalculated": 4708.697006105485,
+          "match": true
+        },
+        {
+          "name": "Stake APR using retained AERO price",
+          "published": 12.266334356458874,
+          "recalculated": 12.266334356458874,
+          "match": true
+        },
+        {
+          "name": "complete incentive schedules",
+          "published": [
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "8483092592592592592592592592592592",
+              "start": 1792630800,
+              "end": 1792803600
+            },
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "10871626984126984126984126984126984",
+              "start": 1792702800,
+              "end": 1793307600
+            },
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "57870370370370370370370370370370",
+              "start": 1792888200,
+              "end": 1793061000
+            }
+          ],
+          "recalculated": [
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "8483092592592592592592592592592592",
+              "start": 1792630800,
+              "end": 1792803600
+            },
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "10871626984126984126984126984126984",
+              "start": 1792702800,
+              "end": 1793307600
+            },
+            {
+              "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+              "rate": "57870370370370370370370370370370",
+              "start": 1792888200,
+              "end": 1793061000
+            }
+          ],
+          "match": true
+        }
+      ],
+      "raw": {
+        "totalSupply": "10339149238294344926587424",
+        "liquidity": "67744738605501",
+        "gaugeLiquidity": "67585613557010",
+        "windowFee0": "1671404828",
+        "windowFee1": "1195698647",
+        "programs": [
+          {
+            "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+            "rate": "8483092592592592592592592592592592",
+            "start": 1792630800,
+            "end": 1792803600
+          },
+          {
+            "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+            "rate": "10871626984126984126984126984126984",
+            "start": 1792702800,
+            "end": 1793307600
+          },
+          {
+            "token": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+            "rate": "57870370370370370370370370370370",
+            "start": 1792888200,
+            "end": 1793061000
+          }
+        ]
+      },
+      "priceLimitation": "Uses retained Gaugecraft USD prices; this is not an independent price-oracle or official UI quote check."
+    },
+    {
+      "label": "OP missing Stake APR price",
+      "poolId": "10:0xca231d91ec00385a54e541f504617d2197f9b7c3",
+      "pair": "USDC/WETH",
+      "chain": "OP Mainnet",
+      "block": "158654841",
+      "blockHash": "0x5bd73ce9986c9fff0d5b1a48a24c9a393f3cec8117bb2ed884bb4fbb4fe700f1",
+      "observedAt": 1792908459,
+      "retrievedAt": 1792908464,
+      "status": "matched",
+      "checks": [
+        {
+          "name": "pool identity",
+          "published": "0xca231d91ec00385a54e541f504617d2197f9b7c3",
+          "recalculated": "0xca231d91ec00385a54e541f504617d2197f9b7c3",
+          "match": true
+        },
+        {
+          "name": "reward manager",
+          "published": "0x5fc5b3600c0c9d823f74fb38711c544d8e1e3faa",
+          "recalculated": "0x5fc5b3600c0c9d823f74fb38711c544d8e1e3faa",
+          "match": true
+        },
+        {
+          "name": "allocation power",
+          "published": 5417064.177537098,
+          "recalculated": 5417064.1775370985,
+          "match": true
+        },
+        {
+          "name": "source window start",
+          "published": 1792735659,
+          "recalculated": 1792735659,
+          "match": true
+        },
+        {
+          "name": "source window end",
+          "published": 1792908459,
+          "recalculated": 1792908459,
+          "match": true
+        },
+        {
+          "name": "cooldown hours",
+          "published": 47,
+          "recalculated": 47,
+          "match": true
+        },
+        {
+          "name": "staked liquidity fraction",
+          "published": 0.9972538451938656,
+          "recalculated": 0.9972538451938656,
+          "match": true
+        },
+        {
+          "name": "eligible fees USD using retained prices",
+          "published": 1678.0589078446612,
+          "recalculated": 1678.0589078446612,
+          "match": true
+        },
+        {
+          "name": "incentives USD using retained prices",
+          "published": 0,
+          "recalculated": 0,
+          "match": true
+        },
+        {
+          "name": "pool rewards USD using retained prices",
+          "published": 1678.0589078446612,
+          "recalculated": 1678.0589078446612,
+          "match": true
+        },
+        {
+          "name": "Stake APR using retained AERO price",
+          "published": null,
+          "recalculated": null,
+          "match": true
+        },
+        {
+          "name": "complete incentive schedules",
+          "published": [
+            {
+              "token": "0x4200000000000000000000000000000000000006",
+              "rate": "3430555555555555555555555555555",
+              "start": 1792630800,
+              "end": 1792803600
+            }
+          ],
+          "recalculated": [
+            {
+              "token": "0x4200000000000000000000000000000000000006",
+              "rate": "3430555555555555555555555555555",
+              "start": 1792630800,
+              "end": 1792803600
+            }
+          ],
+          "match": true
+        }
+      ],
+      "raw": {
+        "totalSupply": "5417064177537097992436953",
+        "liquidity": "597584330299635986",
+        "gaugeLiquidity": "595943271218912996",
+        "windowFee0": "727409237",
+        "windowFee1": "407118856938438186",
+        "programs": [
+          {
+            "token": "0x4200000000000000000000000000000000000006",
+            "rate": "3430555555555555555555555555555",
+            "start": 1792630800,
+            "end": 1792803600
+          }
+        ]
+      },
+      "priceLimitation": "Uses retained Gaugecraft USD prices; this is not an independent price-oracle or official UI quote check."
+    }
+  ]
+}

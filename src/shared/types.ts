@@ -98,7 +98,22 @@ export interface Forecast {
   historyHours: number;
   input: Snapshot;
 }
+export interface PersistenceCoverage {
+  availableAt: number;
+  windowStart: number;
+  windowEnd: number;
+  firstObservation: number | null;
+  lastObservation: number | null;
+  sampleCount: number;
+  spanSeconds: number;
+  maxGapSeconds: number | null;
+  pricedFeeCount: number;
+  sourceWindowSeconds: number;
+  gaps: { start: number; end: number; seconds: number }[];
+  ready: boolean;
+}
 export interface MarketRow {
+  coverage?: PersistenceCoverage;
   snapshot: Snapshot;
   forecast: Forecast;
   aprChange: Maybe;

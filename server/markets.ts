@@ -1,4 +1,5 @@
 import type { MarketRow, Mode } from "../src/shared/types.js";
+import { persistenceCoverage } from "../src/analysis/coverage.js";
 import { forecast } from "../src/analysis/forecast.js";
 import { percentChange } from "../src/analysis/math.js";
 import type { Store } from "./store.js";
@@ -13,6 +14,13 @@ export function markets(store: Store, mode: Mode): MarketRow[] {
       snapshot.observedAt - 6 * 3600,
     );
     const stored = saved.get(snapshot.id);
+    const history = store.history(
+      mode,
+      snapshot.id,
+      snapshot.observedAt - 48 * 3600,
+      snapshot.observedAt,
+      false,
+    );
     // Disabling forecast storage must not attach an old prediction to new inputs.
     // A current view may be computed on demand without rewriting the frozen ledger.
     const current =
@@ -20,16 +28,9 @@ export function markets(store: Store, mode: Mode): MarketRow[] {
       stored.input.retrievedAt === snapshot.retrievedAt &&
       stored.input.blockHash === snapshot.blockHash
         ? stored
-        : forecast(
-            snapshot,
-            store.history(
-              mode,
-              snapshot.id,
-              snapshot.observedAt - 48 * 3600,
-              snapshot.observedAt,
-            ),
-          );
+        : forecast(snapshot, history);
     return {
+      coverage: persistenceCoverage(snapshot, history),
       snapshot: { ...snapshot, raw: {} },
       forecast: { ...current, input: { ...current.input, raw: {} } },
       aprChange:

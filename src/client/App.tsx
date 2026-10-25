@@ -33,6 +33,7 @@ import {
 } from "../analysis/earnings.js";
 import { AllocationSize } from "./AllocationSize.js";
 import { PoolPicker } from "./PoolPicker.js";
+import { Coverage } from "./Coverage.js";
 import {
   ContextHelp,
   GettingStarted,
@@ -1528,6 +1529,7 @@ function Analysis({
           detail="Per stake and network"
         />
       </div>
+      <Coverage coverage={row.coverage} />
       <div className="section-line">
         <div>
           <h2>Observation history</h2>

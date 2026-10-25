@@ -34,7 +34,7 @@ A consistent local copy measured on October 22, 2026 contained 10,070 live obser
 
 At 474 pools and 48 observations per pool per day, the measured blended physical size implies approximately **103 MB/day, 3.1 GB/30 days, 9.2 GB/90 days and 37.5 GB/year**. These are linear planning estimates using the current live/fixture mix, including forecasts and indexes. They exclude WAL, temporary files, backups, additional pools and future schema changes. Compression is lossless and does not make growth stop. Run `storage:report` again after a week and before resizing.
 
-A separate synthetic stress test backed up and restored a **2,216,857,600-byte database**, crossing the previous 2 GiB whole-buffer boundary. It completed with a 128 MiB Node heap limit and approximately **139 MiB peak process memory**, and verified restored row counts, payload sizes and SQLite integrity. Its zero-filled payload is deliberately highly compressible; this tests memory behavior and recovery, not realistic backup sizes. Synthetic records were never added to research history. Automated object-storage tests use an in-memory test double; a real R2 recovery drill remains required.
+A separate synthetic stress test backed up and restored a **2,216,857,600-byte database**, crossing the previous 2 GiB whole-buffer boundary. It completed with a 128 MiB Node heap limit and approximately **139 MiB peak process memory**, and verified restored row counts, payload sizes and SQLite integrity. Its zero-filled payload is deliberately highly compressible; this tests memory behavior and recovery, not realistic backup sizes. Synthetic records were never added to research history. Automated object-storage tests use an in-memory test double. A real R2 recovery was subsequently verified on October 24; see the verified recovery record below. Repeat the drill against the selected handover generation before migration.
 
 Plan for Railway Pro rather than treating a 5 GB Hobby volume as a long-term solution. Start with enough persistent capacity for the next 90 days plus headroom; the current Pro default is 50 GB. Backup temporary storage must have at least twice the active database size free. Enable disk alerts before reaching 80% use. Reassess retention and archival retrieval well before a year. [Railway volume limits](https://docs.railway.com/volumes/reference).
 
@@ -50,7 +50,7 @@ Use this repository's Dockerfile and railway.json, one replica, one persistent v
 | `PORT`                | Railway-provided port, otherwise 4317                                                                                |
 | `COLLECT`             | `0` during import and verification; remove or set `1` only at handover                                               |
 | `ALLOWED_HOSTS`       | Comma-separated custom hostnames, without scheme or port; Railway's generated public domain is allowed automatically |
-| `CORS_ORIGINS`        | `https://provatidis.com` for the existing Pages frontend; explicit origins only                                      |
+| `CORS_ORIGINS`        | `https://gaugecraft.sh` for the Pages frontend; explicit origins only                                                |
 | `BACKUP_ENABLED`      | `1` after R2 configuration; default disabled                                                                         |
 | `BACKUP_TEMP_DIR`     | Optional directory with sufficient temporary capacity; defaults to OS temp                                           |
 | `BOOTSTRAP_R2_BACKUP` | Exact verified `backups/<generation>` key for first import only; remove after success                                |
@@ -139,7 +139,17 @@ Acceptance requires all seven networks collecting for at least 48 hours, source 
 2. Pause the GitHub workflow and let any active collection finish. Download the latest complete release asset and verify its digest. This is the authoritative public database; do not substitute the local measurement copy.
 3. Migrate if needed, preserve a separate rollback copy, upload a verified R2 generation, and configure the Railway bootstrap key. Confirm fingerprints after import and remove the bootstrap setting.
 4. Enable exactly one Railway collector. Verify fresh runs across all configured networks and start monitoring. Keep the old public frontend available during verification.
-5. Set GitHub repository variables `COLLECTOR_HOSTING=railway` and `VITE_API_ORIGIN` to the verified Railway HTTPS origin. Re-enable the workflow and trigger it manually. This builds only the frontend, skips GitHub collection/storage and makes scheduled events no-ops. Confirm the published site reads the new API with CORS from `https://provatidis.com`.
+5. Set GitHub repository variables `COLLECTOR_HOSTING=railway` and `VITE_API_ORIGIN` to the verified Railway HTTPS origin. Re-enable the workflow and trigger it manually. This builds only the frontend, skips GitHub collection/storage and makes scheduled events no-ops. Confirm the published site reads the new API with CORS from `https://gaugecraft.sh`.
 6. Observe 48 hours and perform the real restore drill. Do not delete old backups or declare completion early. If rolling back, stop the new writer and reconcile its newer observations before resuming the old collector; avoid two divergent histories.
 
 No DNS migration is required for this first step. Passiko and the personal website remain independent.
+
+## Migration preflight while provisioning is deferred
+
+The frontend is now `https://gaugecraft.sh`. Set the new backend's `CORS_ORIGINS` to that exact origin; the API hostname belongs in `ALLOWED_HOSTS`, not the frontend hostname. Keep `VITE_API_ORIGIN` unset on GitHub until the new HTTPS API passes read-only, CORS and data checks. The API hostname is not yet provisioned.
+
+Before handover, record the selected GitHub release asset, its published SHA-256, its latest live observation timestamp and the verified R2 generation. Restore that exact generation into a separate database and compare all record fingerprints with the release source. Keep `COLLECT=0` on the replacement service during these checks. The local `data/migration/compact.sqlite` is an old measurement copy and must never be used as the public handover database.
+
+Prepare three independent HTTP monitors for `/health/live`, `/health/data` and `/health/storage`, checked every five minutes with a confirmed alert recipient. Data and storage checks must alert on HTTP 503; an HTML page or HTTP redirect is not a successful health response. A disabled backup is not proof of backup protection. Provisioning the monitor and testing an actual alert remain part of handover acceptance; the current repository configuration sends no alerts by itself.
+
+Record a 48-hour observation log after cutover: per-network source timestamps and gaps, collector errors, backup success and restoration, restart/deployment survival, disk headroom and alert delivery. History gates remain unchanged and may require further collection even after the operational observation period.

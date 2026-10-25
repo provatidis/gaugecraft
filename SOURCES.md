@@ -162,3 +162,19 @@ Only active, fresh pools with complete nonnegative inputs and a 47–49-hour sou
 Storage v3 losslessly compresses records, deduplicates raw evidence by SHA-256 and references each frozen forecast's exact original snapshot. It does not change formulas, timestamps, prices, outputs or evaluation gates. Migration is performed on a SQLite backup and compares every logical record before installing a new file. Old input mismatches abort migration. Streaming backups avoid database-sized memory buffers.
 
 [DEPLOYMENT.md](DEPLOYMENT.md) documents measured storage savings, growth estimates, remaining raw-history retention, separate R2 backups, provider limits, health checks and the controlled handover. Configuration is not evidence that deployment, alert delivery or a 48-hour observation period has succeeded. The GitHub collector stays active until its hosting variable is explicitly changed.
+
+## Forecast-readiness diagnostics (October 25, 2026)
+
+Pool analysis now exposes the same rolling 48-hour gates used by `transparent-v1`: at least 80 observations, a span of at least 47.5 hours, no adjacent source-block gap over 75 minutes, at least 80 observations with a known eligible-fee estimate, and a latest protocol fee window of at least 47 hours. Zero observed fees count as priced; missing values do not. Pool identity, source mode, observation time and retrieval cutoff isolate the inputs. The panel is independent of the chart range and reports actual UTC gap boundaries, not an invented backfill or a forecast-accuracy percentage.
+
+Diagnostics are computed for the current market view. Stored forecast bodies, their immutable input records, financial formulas and evaluation gates are unchanged. A compatibility hash over pre-change forecast outputs and regression tests guard that boundary. Passing the history gate does not establish complete current reward inputs or guarantee a future return.
+
+## Five-pool onchain spot check (October 25, 2026)
+
+[Validation record](https://github.com/provatidis/gaugecraft/blob/main/validation/2026-10-25.json) contains five published snapshots independently re-read through ordinary public JSON-RPC at each original block number and hash. All 60 recorded comparisons matched within `1e-8 × max(1, abs(published), abs(recalculated))` for numeric display values; addresses and incentive schedules matched exactly. Cases cover Base WETH/USDC, a Basic pool, scheduled incentives, incentive expiry within 48 hours, and an OP pool with unavailable Stake APR pricing.
+
+The check verifies pool/reward-manager identity, current decayed reward supply, source fee-window boundaries, the 47-hour cooldown, current liquidity eligibility, exact incentive token/rate/start/end records, and independent fee/reward/APR arithmetic. Raw supply, liquidity, fee amounts and program schedules are retained in the report. It never opens or writes the collector database.
+
+USD arithmetic reuses the snapshot’s retained prices. This does **not** independently validate the spot-price discovery path, establish an oracle value, reconcile a same-block official frontend USD quote, audit every contract, or demonstrate predictive accuracy. No numeric discrepancy was observed within this sample. The official [Markets documentation](https://app.aero.xyz/docs/products/markets/), re-read on October 25, continues to describe shared next-48-hour estimated rewards and a variable annualized Stake APR. The fee-eligibility approximation and price differences described above remain limitations.
+
+Repeat the read-only check with `node scripts/validate-protocol.mjs validation/new-check.json` using a new output filename; existing reports are never overwritten. Public RPCs must serve the published blocks; unavailable reads are recorded honestly and cause a nonzero exit rather than a success claim.

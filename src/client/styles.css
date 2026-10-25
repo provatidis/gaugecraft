@@ -2498,3 +2498,121 @@ footer a {
     min-width: 44px;
   }
 }
+
+.coverage-panel {
+  padding: 22px;
+  margin: 22px 0;
+}
+.coverage-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.coverage-heading p,
+.coverage-explanation,
+.coverage-cutoff {
+  font-size: 12px;
+}
+.coverage-checks {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0 14px;
+}
+.coverage-check {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.coverage-check > span:first-child {
+  color: #526b71;
+  font-size: 12px;
+  min-height: 30px;
+}
+.coverage-check strong {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.coverage-check small {
+  color: #60747e;
+  font-size: 12px;
+}
+.coverage-check-status {
+  font-size: 12px;
+  margin-top: auto;
+}
+.coverage-check.passed .coverage-check-status {
+  color: #117d73;
+}
+.coverage-check.pending .coverage-check-status {
+  color: #8b6321;
+}
+.coverage-explanation {
+  margin-top: 16px;
+}
+.coverage-cutoff {
+  margin-top: 12px;
+  color: #60747e;
+}
+.coverage-gaps {
+  margin-top: 16px;
+  border-top: 1px solid #e3eaeb;
+  padding-top: 14px;
+}
+.coverage-gaps summary {
+  cursor: pointer;
+  color: #34675f;
+  font-size: 12px;
+}
+.coverage-gaps p {
+  font-size: 12px;
+}
+.coverage-gap-scroll {
+  overflow-x: auto;
+}
+.coverage-gaps table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.coverage-gaps th,
+.coverage-gaps td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #e3eaeb;
+  text-align: left;
+}
+.coverage-gaps th {
+  color: #526b71;
+  font-weight: 500;
+}
+@media (max-width: 1200px) {
+  .coverage-checks {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 22px 16px;
+  }
+}
+@media (max-width: 700px) {
+  .coverage-panel {
+    padding: 19px;
+  }
+  .coverage-heading {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .coverage-checks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .coverage-check > span:first-child {
+    min-height: 0;
+  }
+  .coverage-check strong {
+    font-size: 21px;
+  }
+  .coverage-gaps th,
+  .coverage-gaps td {
+    min-width: 135px;
+  }
+}
