@@ -34,6 +34,7 @@ import {
 import { AllocationSize } from "./AllocationSize.js";
 import { PoolPicker } from "./PoolPicker.js";
 import { Coverage } from "./Coverage.js";
+import { ThemeSelect } from "./ThemeSelect.js";
 import {
   ContextHelp,
   GettingStarted,
@@ -303,7 +304,10 @@ export default function App() {
           }}
         >
           <span className="brand-mark" aria-hidden="true">
-            <img src={assetUrl("brand-mark-inverse.svg")} alt="" />
+            <img
+              src={assetUrl("brand-mark-inverse.svg?v=graphite-blue")}
+              alt=""
+            />
           </span>
           <span>
             gaugecraft<small>ALLOCATION RESEARCH</small>
@@ -364,6 +368,7 @@ export default function App() {
             </b>
           </div>
           <div className="top-actions">
+            <ThemeSelect />
             <button
               className="guide-button"
               onClick={showGuide}
@@ -1577,7 +1582,7 @@ function Analysis({
                     >
                       <CartesianGrid
                         vertical={false}
-                        stroke="#e8edee"
+                        stroke="var(--line)"
                         strokeDasharray="3 4"
                       />
                       <XAxis
@@ -1589,13 +1594,17 @@ function Analysis({
                             .toISOString()
                             .slice(days > 2 ? 5 : 11, days > 2 ? 10 : 16)
                         }
-                        tick={{ fontSize: 11, fill: "#647984" }}
+                        tick={{ fontSize: 11, fill: "var(--muted)" }}
+                        axisLine={{ stroke: "var(--line)" }}
+                        tickLine={{ stroke: "var(--line)" }}
                         minTickGap={60}
                       />
                       <YAxis
                         width={58}
                         tickFormatter={(v) => number(Number(v), true)}
-                        tick={{ fontSize: 11, fill: "#647984" }}
+                        tick={{ fontSize: 11, fill: "var(--muted)" }}
+                        axisLine={{ stroke: "var(--line)" }}
+                        tickLine={{ stroke: "var(--line)" }}
                         domain={
                           key === "stakeApr" || key === "allocation"
                             ? ["auto", "auto"]
@@ -1603,6 +1612,9 @@ function Analysis({
                         }
                       />
                       <Tooltip
+                        cursor={{ stroke: "var(--muted)" }}
+                        labelStyle={{ color: "var(--foreground)" }}
+                        itemStyle={{ color: "var(--foreground)" }}
                         labelFormatter={(t) => date(Number(t))}
                         formatter={(v) =>
                           key === "stakeApr"
@@ -1614,14 +1626,16 @@ function Analysis({
                         contentStyle={{
                           fontSize: 12,
                           borderRadius: 8,
-                          border: "1px solid #d9e1e3",
+                          border: "1px solid var(--control-border)",
+                          background: "var(--surface)",
+                          color: "var(--foreground)",
                         }}
                       />
                       <Line
                         type="linear"
                         dataKey={key}
                         name={label}
-                        stroke="#14877f"
+                        stroke="var(--accent)"
                         strokeWidth={2}
                         dot={history.length < 6 ? { r: 3 } : false}
                         activeDot={{ r: 4 }}

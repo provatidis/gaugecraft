@@ -5,6 +5,10 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ["public/theme.js"],
+    languageOptions: { globals: { window: "readonly" } },
+  },
+  {
     files: ["scripts/*.mjs"],
     languageOptions: { globals: { console: "readonly" } },
   },

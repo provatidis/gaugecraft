@@ -12,6 +12,8 @@ Use the app to move from **your allocation size → modeled earnings → sustain
 
 Open **How to use** in the app header for a concise research routine, direct links to all five sections and expandable explanations. The optional Markets introduction can be dismissed; the full guide remains available on desktop and mobile. Dismissal is stored only in this browser. Each research screen also has an expandable help prompt.
 
+Choose **System**, **Dark** or **Light** in the header’s theme selector. System follows your device’s appearance, including changes while the app is open. Your choice is stored only in this browser. Blue identifies controls and selection; green, amber and coral accompany positive changes, warnings and negative changes. Headline APRs remain neutral.
+
 To learn the controls, select **Sample fixtures** in the header. Every figure in that mode is synthetic. Switch back to **Live observations** before researching actual pools.
 
 ### A repeatable research routine
