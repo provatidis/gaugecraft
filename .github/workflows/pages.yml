@@ -22,6 +22,9 @@ jobs:
     if: github.event_name != 'schedule' || vars.COLLECTOR_HOSTING != 'railway'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    outputs:
+      # Preserve the build's artifact name when only deployment is retried.
+      pages_artifact: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
     permissions:
       contents: write
     steps:
@@ -72,6 +75,7 @@ jobs:
         run: node -e 'const fs = require("node:fs"); for (const f of ["SOURCES.md", "PLAN.md"]) fs.copyFileSync(f, "dist/" + f); fs.writeFileSync("dist/.nojekyll", "")'
       - uses: actions/upload-pages-artifact@v4
         with:
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist
       - name: Record collection outcome
         if: steps.collect.outcome == 'failure'
@@ -91,3 +95,5 @@ jobs:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: ${{ needs.build.outputs.pages_artifact }}
