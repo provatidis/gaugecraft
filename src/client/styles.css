@@ -2743,6 +2743,91 @@ select,
 .theme-control select {
   min-width: 85px;
 }
+.install-app {
+  position: relative;
+  flex-shrink: 0;
+}
+.install-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 9px;
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.install-button svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.install-button:hover,
+.install-button[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+.install-popover {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 220px);
+  overflow-y: auto;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: 0 12px 36px var(--shadow-color);
+  color: var(--foreground);
+}
+.install-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.install-heading img {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 10px;
+}
+.install-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.install-popover p {
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.install-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.install-popover .button {
+  width: 100%;
+  justify-content: center;
+  margin-top: 16px;
+}
+.install-popover .install-note {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+.install-popover .text-link {
+  min-height: 40px;
+}
 @media (max-width: 1100px) {
   .topbar .breadcrumb {
     display: none;
@@ -2777,5 +2862,42 @@ select,
   }
   .nav-item.active {
     box-shadow: inset 0 -2px 0 var(--nav-accent);
+  }
+  .topbar {
+    height: auto;
+    padding: 10px 16px;
+  }
+  .topbar .top-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 40px;
+    gap: 8px;
+  }
+  .topbar .guide-button {
+    grid-row: 1;
+    grid-column: 1;
+    justify-self: start;
+    margin: 0;
+    min-height: 40px;
+  }
+  .install-app {
+    grid-row: 1;
+    grid-column: 2 / 4;
+    justify-self: end;
+  }
+  .install-button {
+    min-height: 40px;
+  }
+  .top-actions > select {
+    grid-row: 2;
+    grid-column: 1 / 3;
+    min-width: 0;
+    min-height: 40px;
+    font-size: 14px;
+  }
+  .top-actions > .icon-button {
+    grid-row: 2;
+    grid-column: 3;
+    width: 40px;
+    height: 40px;
   }
 }

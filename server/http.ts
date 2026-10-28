@@ -215,6 +215,7 @@ export function handler(
                 ".css": "text/css",
                 ".svg": "image/svg+xml",
                 ".png": "image/png",
+                ".webmanifest": "application/manifest+json",
                 ".md": "text/plain; charset=utf-8",
               } as Record<string, string>
             )[extname(file)] ?? "application/octet-stream",

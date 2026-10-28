@@ -35,6 +35,7 @@ import { AllocationSize } from "./AllocationSize.js";
 import { PoolPicker } from "./PoolPicker.js";
 import { Coverage } from "./Coverage.js";
 import { ThemeSelect } from "./ThemeSelect.js";
+import { InstallApp } from "./InstallApp.js";
 import {
   ContextHelp,
   GettingStarted,
@@ -376,6 +377,7 @@ export default function App() {
             >
               <span aria-hidden="true">?</span> How to use
             </button>
+            <InstallApp />
             <span className="utc-date">
               {new Date().toLocaleDateString("en-GB", {
                 day: "2-digit",

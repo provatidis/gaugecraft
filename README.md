@@ -16,6 +16,12 @@ Choose **System**, **Dark** or **Light** in the header’s theme selector. Syste
 
 To learn the controls, select **Sample fixtures** in the header. Every figure in that mode is synthetic. Switch back to **Live observations** before researching actual pools.
 
+### Install on your phone or desktop
+
+Open [gaugecraft.sh](https://gaugecraft.sh/) and select **Install app** in the header. Supporting browsers offer an **Install Gaugecraft** button; otherwise the panel explains the browser’s installation menu. On iPhone or iPad, use **Share → Add to Home Screen → Add** (leave **Open as Web App** enabled if shown). The home-screen icon opens Gaugecraft in its own window. Installation prompts and timing depend on the browser. The install control is hidden when running as an installed app.
+
+An internet connection is required to load observations. Installation adds no background collector, offline data cache, notifications or tracking. Observation requests still check the network; installing cannot fix delayed collection. Your watchlist, appearance and simulator inputs remain local to that browser or installed app, which may have separate storage on some platforms.
+
 ### A repeatable research routine
 
 1. **Check the evidence is current.** Read **Latest retrieval** and **Data health** before comparing pools. Times are UTC. Expand Data health to inspect each network; a successful read on one network does not establish freshness elsewhere. Observations older than 75 minutes are marked stale and excluded from Opportunities. A configured schedule is not proof that collection succeeded.
