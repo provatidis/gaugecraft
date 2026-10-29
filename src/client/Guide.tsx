@@ -33,7 +33,7 @@ const help: Record<ResearchPage, { title: string; paragraphs: string[] }> = {
     paragraphs: [
       "Allocation power is your intended total power in this pool, not dollars. Already allocated is your power included in its current total. To increase from 10,000 to 15,000 power, enter 15,000 and 10,000 respectively. Stake value in USD is optional and only supplies the denominator for personal capital APR.",
       "The model removes your existing power before adding your intended power, then integrates your share of revenue over 48 hours. Intended power is shared with Markets and Opportunities. Existing power is saved separately per pool and data mode. Capital and timing assumptions still carry between pools; review them whenever you switch. Blank remaining days models perpetual power; activation delay is an assumption, not a check of eligibility.",
-      "Competition scenarios start from current other allocation, without automatically applying the Opportunities allocation-growth forecast. The revenue-down case halves all modeled USD revenue, including incentives. Baseline means no new competition; it is not a prediction. Read the 48-hour earnings before the annualized APR.",
+      "Opening an earnings or stress figure carries the same Markets assumptions into Simulator. With immediate, constant own power, the amount matches. Current competition is an alternative starting scenario. Additional shocks apply to the selected case; the revenue-down case halves all modeled USD revenue, including incentives. Read the 48-hour earnings before the annualized APR.",
     ],
   },
   performance: {
@@ -75,12 +75,14 @@ export function GettingStarted({
   onDismiss: () => void;
 }) {
   return (
-    <section
+    <details
       className="getting-started"
       aria-labelledby="getting-started-title"
     >
+      <summary id="getting-started-title">
+        New here? From pool rewards to your share
+      </summary>
       <div className="getting-started-heading">
-        <h2 id="getting-started-title">From pool rewards to your share</h2>
         <button className="text-link dismiss-guide" onClick={onDismiss}>
           Dismiss
         </button>
@@ -102,7 +104,7 @@ export function GettingStarted({
       <button className="text-link" onClick={onGuide}>
         Read the quick guide →
       </button>
-    </section>
+    </details>
   );
 }
 

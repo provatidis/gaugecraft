@@ -21,9 +21,13 @@ import {
   HORIZON,
   incentives,
   SCENARIOS,
-  simulate,
   type SimulationInput,
 } from "../analysis/math.js";
+import { simulateAllocation, SCENARIO_LABELS } from "../analysis/scenarios.js";
+import {
+  BENCHMARK_NAMES,
+  performanceSummary,
+} from "../analysis/performance-summary.js";
 import { get, assetUrl, exportUrl, hosted } from "./data.js";
 import { dataHealth, isFresh } from "../analysis/freshness.js";
 import {
@@ -36,12 +40,17 @@ import { PoolPicker } from "./PoolPicker.js";
 import { Coverage } from "./Coverage.js";
 import { ThemeSelect } from "./ThemeSelect.js";
 import { InstallApp } from "./InstallApp.js";
+import { matchesPool } from "./pool-search.js";
+import { MetricHelp } from "./MetricHelp.js";
+import { useObservationClock } from "./useObservationClock.js";
+import { useResearchRoute } from "./useResearchRoute.js";
 import {
-  ContextHelp,
-  GettingStarted,
-  Guide,
-  type ResearchPage,
-} from "./Guide.js";
+  emptyFilters,
+  type MarketFilters,
+  type Page,
+  type ScenarioBasis,
+} from "./research-route.js";
+import { ContextHelp, GettingStarted, Guide } from "./Guide.js";
 const money = (n: Maybe | undefined, compact = false) =>
   n == null
     ? "—"
@@ -109,12 +118,13 @@ function initialPower() {
   }
 }
 const positionKey = (s: Snapshot) => `${s.mode}:${s.id}`;
-function comparison(row: MarketRow, settings: AllocationSettings) {
+function comparison(row: MarketRow, settings: AllocationSettings, now: number) {
   const reference = settings.power.trim() === "";
   return allocationEarnings(
     row,
     reference ? 1000 : Number(settings.power),
     reference ? 0 : Number(settings.existing[positionKey(row.snapshot)] ?? "0"),
+    now,
   );
 }
 interface State {
@@ -160,7 +170,6 @@ const nav = [
   ["simulator", "⊞", "Simulator"],
   ["performance", "▥", "Performance"],
 ] as const;
-type Page = ResearchPage | "guide";
 function Badge({
   children,
   tone = "neutral",
@@ -191,22 +200,36 @@ function Pair({ s, small = false }: { s: Snapshot; small?: boolean }) {
 }
 function Info({ name, label }: { name: string; label: string }) {
   return (
-    <span title={metricInfo[name]}>
-      {label}{" "}
-      <span className="info" aria-label={metricInfo[name]}>
-        ⓘ
-      </span>
+    <span className="metric-label">
+      {label} <MetricHelp label={label} text={metricInfo[name]} />
     </span>
   );
 }
 export default function App() {
-  const [mode, setMode] = useLocal<Mode>("gc-mode", "live"),
-    [page, setPage] = useState<Page>("markets"),
-    [state, setState] = useState<State | null>(null),
+  const [savedMode] = useLocal<Mode>("gc-mode", "live");
+  const {
+    route,
+    update: updateRoute,
+    scrollRevision,
+    scrollTarget,
+  } = useResearchRoute(savedMode);
+  const { mode, page, pool: selected } = route;
+  const now = useObservationClock();
+  const marketScroll = useRef({ top: 0, left: 0 });
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [state, setState] = useState<State | null>(null),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
-    [refresh, setRefresh] = useState(0),
-    [selected, setSelected] = useState("");
+    [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    try {
+      localStorage.setItem("gc-mode", JSON.stringify(mode));
+    } catch {
+      /* Browser storage is optional. */
+    }
+  }, [mode]);
+  const setSelected = (pool: string) => updateRoute({ pool });
+  const setMode = (mode: Mode) => updateRoute({ mode, pool: "" });
   const [watch, setWatch] = useLocal<string[]>("gc-watchlist", []);
   const [power, setPower] = useLocal<string>(
     "gc-allocation-power",
@@ -230,8 +253,13 @@ export default function App() {
     }
   }, [page]);
   function navigate(next: Page) {
-    setPage(next);
-    window.scrollTo({ top: 0, behavior: "instant" });
+    updateRoute({
+      page: next,
+      ...(["analysis", "simulator"].includes(next) && current
+        ? { pool: current.snapshot.id }
+        : {}),
+      ...(next === "simulator" ? { scenario: "forecast" as const } : {}),
+    });
   }
   const showGuide = () => navigate("guide");
   useEffect(() => {
@@ -239,7 +267,10 @@ export default function App() {
     let alive = true;
     setLoading(true);
     setState((previous) => (previous?.mode === mode ? previous : null));
+    let inFlight = false;
     const load = () => {
+      if (inFlight) return;
+      inFlight = true;
       setLoading(true);
       return get<State>(`/api/state?mode=${mode}`, abort.signal)
         .then((s) => {
@@ -254,36 +285,63 @@ export default function App() {
             setError(e.message);
             setLoading(false);
           }
+        })
+        .finally(() => {
+          inFlight = false;
         });
     };
     void load();
     const timer = setInterval(load, 60000);
+    const resume = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("online", resume);
+    document.addEventListener("visibilitychange", resume);
     return () => {
       alive = false;
       abort.abort();
       clearInterval(timer);
+      window.removeEventListener("online", resume);
+      document.removeEventListener("visibilitychange", resume);
     };
   }, [mode, refresh]);
   const rows = useMemo(
     () => (state?.mode === mode ? state.markets : []),
     [state, mode],
   );
+  const readyToRestore = rows.length > 0;
+  useEffect(() => {
+    if (!readyToRestore) return;
+    const target = scrollTarget.current;
+    const frame = requestAnimationFrame(() =>
+      window.scrollTo({ top: target, behavior: "instant" }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [scrollRevision, readyToRestore, scrollTarget]);
   const current =
     rows.find((r) => r.snapshot.id === selected) ??
     [...rows].sort(
       (a, b) =>
         (b.snapshot.rewards48hUsd ?? -1) - (a.snapshot.rewards48hUsd ?? -1),
     )[0];
+  useEffect(() => {
+    if (!selected && current && ["analysis", "simulator"].includes(page))
+      updateRoute({ pool: current.snapshot.id }, true);
+  }, [selected, current?.snapshot.id, page]);
   const health = dataHealth(
     rows,
     state?.configuredChains ?? [],
     state?.runs ?? [],
     mode,
+    now,
   );
   const last = health.newest;
-  function open(row: MarketRow, p: Page = "analysis") {
-    setSelected(row.snapshot.id);
-    navigate(p);
+  function open(
+    row: MarketRow,
+    p: Page = "analysis",
+    scenario: ScenarioBasis = "forecast",
+  ) {
+    updateRoute({ pool: row.snapshot.id, page: p, scenario });
   }
   const stale = mode === "live" && health.stalePools > 0;
   const healthy =
@@ -293,7 +351,7 @@ export default function App() {
       health.currentNetworks === health.networks.length);
   const revision = `${state?.now ?? 0}:${refresh}`;
   return (
-    <div className="shell">
+    <div className={`shell page-${page}`}>
       <aside className="sidebar">
         <a
           className="brand"
@@ -322,17 +380,29 @@ export default function App() {
               className={page === id ? "nav-item active" : "nav-item"}
               onClick={() => navigate(id)}
               title={label}
+              aria-label={label}
               aria-current={page === id ? "page" : undefined}
             >
               <span>{icon}</span>
-              {label}
+              <span className="nav-label">{label}</span>
+              <span className="mobile-nav-label">
+                {
+                  {
+                    markets: "Markets",
+                    opportunities: "Ideas",
+                    analysis: "Analyze",
+                    simulator: "Simulate",
+                    performance: "Results",
+                  }[id]
+                }
+              </span>
               {id === "opportunities" && (
                 <small>
                   {
                     rows.filter(
                       (r) =>
                         r.snapshot.active &&
-                        isFresh(r.snapshot) &&
+                        isFresh(r.snapshot, now) &&
                         r.forecast.basis === "history" &&
                         r.forecast.stressedPer1000 !== null,
                     ).length
@@ -368,7 +438,18 @@ export default function App() {
                 : nav.find((n) => n[0] === page)?.[2]}
             </b>
           </div>
-          <div className="top-actions">
+          <button
+            className="button secondary mobile-tools-toggle"
+            aria-expanded={toolsOpen}
+            aria-controls="workspace-tools"
+            onClick={() => setToolsOpen(!toolsOpen)}
+          >
+            View options <span aria-hidden="true">{toolsOpen ? "−" : "+"}</span>
+          </button>
+          <div
+            id="workspace-tools"
+            className={`top-actions ${toolsOpen ? "is-open" : ""}`}
+          >
             <ThemeSelect />
             <button
               className="guide-button"
@@ -378,6 +459,13 @@ export default function App() {
               <span aria-hidden="true">?</span> How to use
             </button>
             <InstallApp />
+            <a
+              className="mobile-export text-link"
+              href={exportUrl(mode)}
+              download={`gaugecraft-${mode}.csv`}
+            >
+              Export observations ↓
+            </a>
             <span className="utc-date">
               {new Date().toLocaleDateString("en-GB", {
                 day: "2-digit",
@@ -418,6 +506,15 @@ export default function App() {
               {error} {state ? "Showing the last loaded observations." : ""}
             </div>
           )}
+          {selected &&
+            readyToRestore &&
+            !rows.some((r) => r.snapshot.id === selected) &&
+            ["analysis", "simulator"].includes(page) && (
+              <div className="notice warning">
+                The linked pool is not in this dataset. Showing an available
+                pool; use the picker or change the data source.
+              </div>
+            )}
           {stale && (
             <div className="notice warning">
               <b>
@@ -560,6 +657,13 @@ export default function App() {
                   watch={watch}
                   setWatch={setWatch}
                   allocationSettings={allocationSettings}
+                  now={now}
+                  filters={route.market}
+                  onFiltersChange={(market) => {
+                    marketScroll.current = { top: 0, left: 0 };
+                    updateRoute({ market }, true);
+                  }}
+                  scrollMemory={marketScroll}
                 />
               )}
               {page === "opportunities" && (
@@ -567,6 +671,7 @@ export default function App() {
                   rows={rows}
                   open={open}
                   allocationSettings={allocationSettings}
+                  now={now}
                 />
               )}
               {page === "analysis" && current && (
@@ -577,7 +682,7 @@ export default function App() {
                   watch={watch}
                   mode={mode}
                   revision={revision}
-                  simulate={() => navigate("simulator")}
+                  simulate={() => open(current, "simulator")}
                 />
               )}
               {page === "simulator" && current && (
@@ -587,6 +692,9 @@ export default function App() {
                   select={setSelected}
                   watch={watch}
                   allocationSettings={allocationSettings}
+                  now={now}
+                  basis={route.scenario}
+                  setBasis={(scenario) => updateRoute({ scenario }, true)}
                 />
               )}
               {page === "performance" && (
@@ -678,30 +786,48 @@ function Markets({
   watch,
   setWatch,
   allocationSettings,
+  now,
+  filters,
+  onFiltersChange,
+  scrollMemory,
 }: {
   rows: MarketRow[];
-  open: (r: MarketRow, p?: Page) => void;
+  open: (r: MarketRow, p?: Page, scenario?: ScenarioBasis) => void;
   watch: string[];
   setWatch: (s: string[]) => void;
   allocationSettings: AllocationSettings;
+  now: number;
+  filters: MarketFilters;
+  onFiltersChange: (filters: MarketFilters) => void;
+  scrollMemory: React.RefObject<{ top: number; left: number }>;
 }) {
-  const [search, setSearch] = useState(""),
-    [chain, setChain] = useState("all"),
-    [starred, setStarred] = useState(false),
-    [page, setPage] = useState(0);
+  const { search, chain, starred, page, evidence } = filters;
+  const filter = (patch: Partial<MarketFilters>) =>
+    onFiltersChange({ ...filters, page: 0, ...patch });
+  const setPage = (page: number) => filter({ page });
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const panel = useRef<HTMLElement>(null);
+  function turnPage(page: number) {
+    setPage(page);
+    requestAnimationFrame(() =>
+      panel.current?.scrollIntoView({ block: "start", behavior: "instant" }),
+    );
+  }
   const [sorting, setSorting] = useLocal("gc-market-sort", {
     key: "earnings",
     descending: true,
   });
   const sort = sorting.key,
     desc = sorting.descending;
-  const [evidence, setEvidence] = useState("all");
   const estimates = useMemo(
     () =>
       new Map(
-        rows.map((r) => [r.snapshot.id, comparison(r, allocationSettings)]),
+        rows.map((r) => [
+          r.snapshot.id,
+          comparison(r, allocationSettings, now),
+        ]),
       ),
-    [rows, allocationSettings.power, allocationSettings.existing],
+    [rows, allocationSettings.power, allocationSettings.existing, now],
   );
   const personalSort = sort === "earnings" || sort === "stress";
   const comparableCount = [...estimates.values()].filter(
@@ -713,7 +839,7 @@ function Markets({
     knownTvl = active.filter((r) => r.snapshot.tvlUsd !== null),
     ready = active.filter(
       (r) =>
-        isFresh(r.snapshot) &&
+        isFresh(r.snapshot, now) &&
         r.forecast.basis === "history" &&
         r.forecast.stressedPer1000 !== null,
     );
@@ -729,9 +855,7 @@ function Markets({
             (evidence === "all" || estimates.get(s.id)?.basis === evidence) &&
             (chain === "all" || s.chain === chain) &&
             (!starred || watch.includes(s.id)) &&
-            `${s.token0.symbol} ${s.token1.symbol} ${s.address} ${s.chain}`
-              .toLowerCase()
-              .includes(search.toLowerCase())
+            matchesPool(r, search)
           );
         })
         .sort((a, b) => {
@@ -790,12 +914,11 @@ function Markets({
     setPage(0);
   }
   function clearFilters() {
-    setSearch("");
-    setChain("all");
-    setStarred(false);
-    setEvidence("all");
-    setPage(0);
+    onFiltersChange({ ...emptyFilters });
   }
+  const visible = filtered.slice(currentPage * 25, (currentPage + 1) * 25);
+  const activeFilters =
+    Number(chain !== "all") + Number(evidence !== "all") + Number(starred);
   return (
     <>
       <AllocationSize
@@ -851,7 +974,7 @@ function Markets({
           />
         </div>
       </details>
-      <section className="panel market-panel">
+      <section ref={panel} className={`panel market-panel mode-${view}`}>
         <div className="panel-header">
           <div>
             <h2>
@@ -893,48 +1016,59 @@ function Markets({
               placeholder="Search tokens, pool address or network"
               value={search}
               onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(0);
+                filter({ search: e.target.value });
               }}
             />
           </label>
-          <select
-            aria-label="Filter network"
-            value={chain}
-            onChange={(e) => {
-              setChain(e.target.value);
-              setPage(0);
-            }}
-          >
-            <option value="all">All networks</option>
-            {[...new Set(rows.map((r) => r.snapshot.chain))].sort().map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
-          <select
-            aria-label="Filter evidence"
-            value={evidence}
-            onChange={(e) => {
-              setEvidence(e.target.value);
-              setPage(0);
-            }}
-          >
-            <option value="all">All evidence groups</option>
-            <option value="history">History-based estimates</option>
-            <option value="baseline">Full-window baselines</option>
-            <option value="partial">Partial fee windows</option>
-            <option value="unavailable">Unavailable estimates</option>
-          </select>
           <button
-            className={starred ? "button filter selected" : "button filter"}
-            aria-pressed={starred}
-            onClick={() => {
-              setStarred(!starred);
-              setPage(0);
-            }}
+            className="button secondary mobile-filter-toggle"
+            aria-expanded={filtersOpen}
+            aria-controls="market-filter-options"
+            onClick={() => setFiltersOpen(!filtersOpen)}
           >
-            ☆ Watchlist <span>{watch.length}</span>
+            Filters{activeFilters ? ` · ${activeFilters}` : ""}
           </button>
+          <div
+            id="market-filter-options"
+            className={`filter-options ${filtersOpen ? "is-open" : ""}`}
+          >
+            <select
+              aria-label="Filter network"
+              value={chain}
+              onChange={(e) => {
+                filter({ chain: e.target.value });
+              }}
+            >
+              <option value="all">All networks</option>
+              {[...new Set(rows.map((r) => r.snapshot.chain))]
+                .sort()
+                .map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+            </select>
+            <select
+              aria-label="Filter evidence"
+              value={evidence}
+              onChange={(e) => {
+                filter({ evidence: e.target.value });
+              }}
+            >
+              <option value="all">All evidence groups</option>
+              <option value="history">History-based estimates</option>
+              <option value="baseline">Full-window baselines</option>
+              <option value="partial">Partial fee windows</option>
+              <option value="unavailable">Unavailable estimates</option>
+            </select>
+            <button
+              className={starred ? "button filter selected" : "button filter"}
+              aria-pressed={starred}
+              onClick={() => {
+                filter({ starred: !starred });
+              }}
+            >
+              ☆ Watchlist <span>{watch.length}</span>
+            </button>
+          </div>
           {(search || chain !== "all" || starred || evidence !== "all") && (
             <button className="clear-filters" onClick={clearFilters}>
               Clear filters
@@ -942,6 +1076,21 @@ function Markets({
           )}
         </div>
         <div className="market-view-bar">
+          <span className="mobile-ranking-note">
+            {comparableCount === 0
+              ? "Earnings unavailable · inspect pool rewards"
+              : personalSort
+                ? "Ranked within evidence groups"
+                : "Pool rewards are shared totals"}
+            <MetricHelp
+              label="How pools are ranked"
+              text={
+                personalSort
+                  ? "History-based estimates are ranked first, followed by full-window baselines. Partial or unavailable estimates follow without an earnings rank. These groups describe the available evidence, not a guarantee that every history-based pool is better."
+                  : "Pool rewards are shared by all allocators. Switch to an earnings sort to account for your allocation size."
+              }
+            />
+          </span>
           <p>
             {personalSort
               ? "Sorted within evidence groups: history-based estimates, then full-window baselines. Partial or unavailable estimates follow without an earnings rank."
@@ -998,8 +1147,99 @@ function Markets({
             </button>
           </div>
         </div>
+        <div className="market-cards" aria-label="Pool comparisons">
+          {visible.map((r) => {
+            const s = r.snapshot,
+              estimate = estimates.get(s.id)!;
+            return (
+              <article className="market-card" key={s.id}>
+                <div className="market-card-heading">
+                  <button className="pool-button" onClick={() => open(r)}>
+                    <Pair s={s} />
+                  </button>
+                  <button
+                    className={`star ${watch.includes(s.id) ? "on" : ""}`}
+                    aria-label={`${watch.includes(s.id) ? "Remove" : "Add"} ${s.token0.symbol}/${s.token1.symbol} ${s.chain} ${short(s.address)} ${watch.includes(s.id) ? "from" : "to"} watchlist`}
+                    onClick={() =>
+                      setWatch(
+                        watch.includes(s.id)
+                          ? watch.filter((id) => id !== s.id)
+                          : [...watch, s.id],
+                      )
+                    }
+                  >
+                    {watch.includes(s.id) ? "★" : "☆"}
+                  </button>
+                </div>
+                <div className="market-card-returns">
+                  <div>
+                    <Info name="earnings" label="Earnings / 48h" />
+                    <button
+                      className="card-earnings"
+                      onClick={() => open(r, "simulator", "forecast")}
+                      aria-label={`${earningsMoney(estimate.earnings)} estimated earnings over 48 hours. Simulate ${s.token0.symbol}/${s.token1.symbol} ${s.chain}`}
+                    >
+                      {earningsMoney(estimate.earnings)}
+                    </button>
+                  </div>
+                  <div>
+                    <Info name="stress" label="Stress / 48h" />
+                    <button
+                      className="card-earnings"
+                      onClick={() => open(r, "simulator", "stress")}
+                      aria-label={`${earningsMoney(estimate.stress)} stress earnings over 48 hours. Simulate ${s.token0.symbol}/${s.token1.symbol} ${s.chain}`}
+                    >
+                      {earningsMoney(estimate.stress)}
+                    </button>
+                  </div>
+                </div>
+                <div className="market-card-evidence">
+                  <Badge tone={estimate.basis === "history" ? "good" : "warn"}>
+                    {EVIDENCE_LABELS[estimate.basis]}
+                  </Badge>
+                  <span>
+                    {((s.windowEnd - s.windowStart) / 3600).toFixed(1)}h fees
+                    observed
+                  </span>
+                </div>
+                {estimate.earnings === null && (
+                  <p className="card-unavailable">{estimate.reason}</p>
+                )}
+                <div className="market-card-footer">
+                  <span>
+                    Pool rewards <b>{money(s.rewards48hUsd)}</b> · shared total
+                  </span>
+                  <button className="text-link" onClick={() => open(r)}>
+                    Analyze →
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+          {!filtered.length && (
+            <div className="empty compact">
+              <h3>No pools match these filters.</h3>
+              <p>Try token and network terms together, such as USDC Base.</p>
+              <button className="button secondary" onClick={clearFilters}>
+                Clear filters
+              </button>
+            </div>
+          )}
+        </div>
         <div
           className="table-scroll market-scroll"
+          ref={(node) => {
+            if (node) {
+              node.scrollTop = scrollMemory.current.top;
+              node.scrollLeft = scrollMemory.current.left;
+            }
+          }}
+          onScroll={(event) => {
+            scrollMemory.current = {
+              top: event.currentTarget.scrollTop,
+              left: event.currentTarget.scrollLeft,
+            };
+          }}
           tabIndex={0}
           role="region"
           aria-label="Pool comparison table; scroll horizontally for more metrics"
@@ -1035,160 +1275,167 @@ function Markets({
                     {key === "evidence" ? (
                       <Info name={key} label={label} />
                     ) : (
-                      <button onClick={() => sortBy(key)}>
-                        <Info name={key} label={label} />
-                        {sort === key ? (
-                          <span className="sort-active">
-                            {desc ? "↓" : "↑"}
-                          </span>
-                        ) : null}
-                      </button>
+                      <span className="sortable-metric">
+                        <button onClick={() => sortBy(key)}>
+                          {label}
+                          {sort === key ? (
+                            <span className="sort-active">
+                              {desc ? "↓" : "↑"}
+                            </span>
+                          ) : null}
+                        </button>
+                        <MetricHelp label={label} text={metricInfo[key]} />
+                      </span>
                     )}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered
-                .slice(currentPage * 25, (currentPage + 1) * 25)
-                .map((r) => {
-                  const s = r.snapshot;
-                  const estimate = estimates.get(s.id)!;
-                  return (
-                    <tr key={s.id} className={!s.active ? "inactive" : ""}>
-                      <td className="star-col">
-                        <button
-                          className={`star ${watch.includes(s.id) ? "on" : ""}`}
-                          aria-label={`${watch.includes(s.id) ? "Remove" : "Add"} ${s.token0.symbol}/${s.token1.symbol} ${short(s.address)} ${watch.includes(s.id) ? "from" : "to"} watchlist`}
-                          onClick={() =>
-                            setWatch(
-                              watch.includes(s.id)
-                                ? watch.filter((x) => x !== s.id)
-                                : [...watch, s.id],
-                            )
-                          }
-                        >
-                          {watch.includes(s.id) ? "★" : "☆"}
-                        </button>
-                      </td>
-                      <td>
-                        <button className="pool-button" onClick={() => open(r)}>
-                          <Pair s={s} />
-                        </button>
-                        {!s.active && <Badge tone="warn">Inactive</Badge>}
-                        {!isFresh(s) && (
-                          <Badge tone="warn">Stale observation</Badge>
-                        )}
-                      </td>
-                      <td
-                        className="emphasis personal-earnings"
-                        title={estimate.reason}
+              {visible.map((r) => {
+                const s = r.snapshot;
+                const estimate = estimates.get(s.id)!;
+                return (
+                  <tr key={s.id} className={!s.active ? "inactive" : ""}>
+                    <td className="star-col">
+                      <button
+                        className={`star ${watch.includes(s.id) ? "on" : ""}`}
+                        aria-label={`${watch.includes(s.id) ? "Remove" : "Add"} ${s.token0.symbol}/${s.token1.symbol} ${short(s.address)} ${watch.includes(s.id) ? "from" : "to"} watchlist`}
+                        onClick={() =>
+                          setWatch(
+                            watch.includes(s.id)
+                              ? watch.filter((x) => x !== s.id)
+                              : [...watch, s.id],
+                          )
+                        }
                       >
-                        <button
-                          className="metric-button"
-                          onClick={() => open(r, "simulator")}
-                          aria-label={`Simulate ${s.token0.symbol}/${s.token1.symbol} ${s.chain} allocation`}
-                        >
-                          {earningsMoney(estimate.earnings)}
-                        </button>
-                        <small>
-                          {estimate.basis === "baseline"
-                            ? "Baseline"
-                            : estimate.basis === "history"
-                              ? "Modeled estimate"
-                              : estimate.basis === "partial"
-                                ? "Needs full fee window"
-                                : estimate.reason}
-                        </small>
-                      </td>
-                      <td className="personal-stress" title={metricInfo.stress}>
+                        {watch.includes(s.id) ? "★" : "☆"}
+                      </button>
+                    </td>
+                    <td>
+                      <button className="pool-button" onClick={() => open(r)}>
+                        <Pair s={s} />
+                      </button>
+                      {!s.active && <Badge tone="warn">Inactive</Badge>}
+                      {!isFresh(s, now) && (
+                        <Badge tone="warn">Stale observation</Badge>
+                      )}
+                    </td>
+                    <td
+                      className="emphasis personal-earnings"
+                      title={estimate.reason}
+                    >
+                      <button
+                        className="metric-button"
+                        onClick={() => open(r, "simulator")}
+                        aria-label={`${earningsMoney(estimate.earnings)} estimated earnings over 48 hours. Simulate ${s.token0.symbol}/${s.token1.symbol} ${s.chain} allocation`}
+                      >
+                        {earningsMoney(estimate.earnings)}
+                      </button>
+                      <small>
+                        {estimate.basis === "baseline"
+                          ? "Baseline"
+                          : estimate.basis === "history"
+                            ? "Modeled estimate"
+                            : estimate.basis === "partial"
+                              ? "Needs full fee window"
+                              : estimate.reason}
+                      </small>
+                    </td>
+                    <td className="personal-stress" title={metricInfo.stress}>
+                      <button
+                        className="metric-button"
+                        onClick={() => open(r, "simulator", "stress")}
+                        aria-label={`${earningsMoney(estimate.stress)} stress earnings over 48 hours. Simulate ${s.token0.symbol}/${s.token1.symbol} ${s.chain} allocation`}
+                      >
                         {earningsMoney(estimate.stress)}
-                        <small>−50% fees · +50% competition</small>
-                      </td>
-                      <td className="evidence-cell" title={estimate.reason}>
-                        <Badge
-                          tone={estimate.basis === "history" ? "good" : "warn"}
-                        >
-                          {EVIDENCE_LABELS[estimate.basis]}
-                        </Badge>
-                        <small>
-                          {((s.windowEnd - s.windowStart) / 3600).toFixed(1)}h
-                          fees observed
-                        </small>
-                      </td>
-                      <td className="emphasis">
-                        {money(s.rewards48hUsd)}
-                        <small>shared by all allocators</small>
-                      </td>
-                      <td>
-                        {money(s.eligibleFees48hUsd)}
-                        <small
-                          className={
-                            s.windowEnd - s.windowStart < 47 * 3600
-                              ? "partial-window"
-                              : ""
-                          }
-                        >
-                          {Math.max(
-                            0,
-                            (s.windowEnd - s.windowStart) / 3600,
-                          ).toFixed(1)}
-                          h observed · est.
-                        </small>
-                      </td>
-                      <td>
-                        {money(s.incentives48hUsd)}
-                        <small>
-                          {s.programs?.filter(
-                            (p) =>
-                              p.end > s.observedAt &&
-                              p.start < s.observedAt + HORIZON,
-                          ).length ?? "—"}{" "}
-                          programs · est.
-                        </small>
-                      </td>
-                      <td>
-                        {number(s.allocation, true)}
-                        <small>reward supply</small>
-                      </td>
-                      <td className="apr extra-metric">
-                        <button
-                          className="metric-button"
-                          title={metricInfo.stakeApr}
-                          onClick={() => open(r, "simulator")}
-                        >
-                          {pct(s.stakeApr)}
-                        </button>
-                        <small>power APR · est.</small>
-                      </td>
-                      <td className="extra-metric">{money(s.tvlUsd, true)}</td>
-                      <td className="extra-metric">
-                        {money(s.volume48hUsd, true)}
-                        <small>
-                          {Math.max(
-                            0,
-                            (s.windowEnd - s.windowStart) / 3600,
-                          ).toFixed(1)}
-                          h observed
-                        </small>
-                      </td>
-                      <td
-                        className={`extra-metric ${r.aprChange === null ? "" : r.aprChange >= 0 ? "positive" : "negative"}`}
+                      </button>
+                      <small>−50% fees · +50% competition</small>
+                    </td>
+                    <td className="evidence-cell" title={estimate.reason}>
+                      <Badge
+                        tone={estimate.basis === "history" ? "good" : "warn"}
                       >
-                        {r.aprChange === null
-                          ? "—"
-                          : `${r.aprChange >= 0 ? "+" : ""}${r.aprChange.toFixed(2)} pp`}
-                      </td>
-                      <td
-                        className={`extra-metric ${r.allocationChange !== null && r.allocationChange > 10 ? "negative" : ""}`}
+                        {EVIDENCE_LABELS[estimate.basis]}
+                      </Badge>
+                      <small>
+                        {((s.windowEnd - s.windowStart) / 3600).toFixed(1)}h
+                        fees observed
+                      </small>
+                    </td>
+                    <td className="emphasis">
+                      {money(s.rewards48hUsd)}
+                      <small>shared by all allocators</small>
+                    </td>
+                    <td>
+                      {money(s.eligibleFees48hUsd)}
+                      <small
+                        className={
+                          s.windowEnd - s.windowStart < 47 * 3600
+                            ? "partial-window"
+                            : ""
+                        }
                       >
-                        {r.allocationChange === null
-                          ? "—"
-                          : `${r.allocationChange >= 0 ? "+" : ""}${r.allocationChange.toFixed(1)}%`}
-                      </td>
-                    </tr>
-                  );
-                })}
+                        {Math.max(
+                          0,
+                          (s.windowEnd - s.windowStart) / 3600,
+                        ).toFixed(1)}
+                        h observed · est.
+                      </small>
+                    </td>
+                    <td>
+                      {money(s.incentives48hUsd)}
+                      <small>
+                        {s.programs?.filter(
+                          (p) =>
+                            p.end > s.observedAt &&
+                            p.start < s.observedAt + HORIZON,
+                        ).length ?? "—"}{" "}
+                        programs · est.
+                      </small>
+                    </td>
+                    <td>
+                      {number(s.allocation, true)}
+                      <small>reward supply</small>
+                    </td>
+                    <td className="apr extra-metric">
+                      <button
+                        className="metric-button"
+                        title={metricInfo.stakeApr}
+                        onClick={() => open(r, "simulator")}
+                      >
+                        {pct(s.stakeApr)}
+                      </button>
+                      <small>power APR · est.</small>
+                    </td>
+                    <td className="extra-metric">{money(s.tvlUsd, true)}</td>
+                    <td className="extra-metric">
+                      {money(s.volume48hUsd, true)}
+                      <small>
+                        {Math.max(
+                          0,
+                          (s.windowEnd - s.windowStart) / 3600,
+                        ).toFixed(1)}
+                        h observed
+                      </small>
+                    </td>
+                    <td
+                      className={`extra-metric ${r.aprChange === null ? "" : r.aprChange >= 0 ? "positive" : "negative"}`}
+                    >
+                      {r.aprChange === null
+                        ? "—"
+                        : `${r.aprChange >= 0 ? "+" : ""}${r.aprChange.toFixed(2)} pp`}
+                    </td>
+                    <td
+                      className={`extra-metric ${r.allocationChange !== null && r.allocationChange > 10 ? "negative" : ""}`}
+                    >
+                      {r.allocationChange === null
+                        ? "—"
+                        : `${r.allocationChange >= 0 ? "+" : ""}${r.allocationChange.toFixed(1)}%`}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {filtered.length === 0 && (
@@ -1219,7 +1466,7 @@ function Markets({
           <div>
             <button
               disabled={currentPage === 0}
-              onClick={() => setPage(currentPage - 1)}
+              onClick={() => turnPage(currentPage - 1)}
               aria-label="Previous page"
             >
               ←
@@ -1229,7 +1476,7 @@ function Markets({
             </span>
             <button
               disabled={(currentPage + 1) * 25 >= filtered.length}
-              onClick={() => setPage(currentPage + 1)}
+              onClick={() => turnPage(currentPage + 1)}
               aria-label="Next page"
             >
               →
@@ -1279,13 +1526,15 @@ function Opportunities({
   rows,
   open,
   allocationSettings,
+  now,
 }: {
   rows: MarketRow[];
   open: (r: MarketRow, p?: Page) => void;
   allocationSettings: AllocationSettings;
+  now: number;
 }) {
   const estimates = new Map(
-    rows.map((r) => [r.snapshot.id, comparison(r, allocationSettings)]),
+    rows.map((r) => [r.snapshot.id, comparison(r, allocationSettings, now)]),
   );
   const ranked = rows
     .filter((r) => estimates.get(r.snapshot.id)!.basis === "history")
@@ -1569,8 +1818,8 @@ function Analysis({
         {charts.map(([key, label, unit]) => (
           <div className="panel chart-card" key={key}>
             <div className="chart-heading">
-              <h3 title={metricInfo[key]}>
-                {label} <span className="info">ⓘ</span>
+              <h3>
+                <Info name={key} label={label} />
               </h3>
               <span>{unit}</span>
             </div>
@@ -1765,12 +2014,18 @@ function Simulator({
   select,
   watch,
   allocationSettings,
+  now,
+  basis,
+  setBasis,
 }: {
   row: MarketRow;
   rows: MarketRow[];
   select: (s: string) => void;
   watch: string[];
   allocationSettings: AllocationSettings;
+  now: number;
+  basis: ScenarioBasis;
+  setBasis: (basis: ScenarioBasis) => void;
 }) {
   const [fields, setFields] = useLocal<Record<string, string>>("gc-simulator", {
     power: "1000",
@@ -1794,10 +2049,12 @@ function Simulator({
       fields.remainingDays === "" ? null : Number(fields.remainingDays),
     activationDelayHours: Number(fields.activationDelayHours),
   };
-  const marketEstimate = comparison(row, allocationSettings);
+  const marketEstimate = comparison(row, allocationSettings, now);
+  const customTiming =
+    input.activationDelayHours !== 0 || input.remainingDays !== null;
   const outputs = SCENARIOS.map((s) => ({
     ...s,
-    ...simulate(row.snapshot, row.forecast.projectedFees, input, s),
+    ...simulateAllocation(row, input, basis, s, now),
   }));
   return (
     <>
@@ -1812,6 +2069,30 @@ function Simulator({
             Power is shared with Markets and Opportunities. Existing allocation
             is saved separately for each pool.
           </p>
+          <label className="field">
+            <span>Starting scenario</span>
+            <select
+              value={basis}
+              onChange={(e) => setBasis(e.target.value as ScenarioBasis)}
+            >
+              <option value="forecast">
+                Markets estimate · projected competition
+              </option>
+              <option value="stress">
+                Markets stress · lower fees, more competition
+              </option>
+              <option value="current">
+                Current competition · fixed baseline
+              </option>
+            </select>
+            <small>
+              {basis === "stress"
+                ? "Forecast fees −50%, projected other power +50%. Scheduled incentive value is unchanged."
+                : basis === "forecast"
+                  ? "Uses the same projected competing power and revenue as Markets."
+                  : "Holds competing power at the current observation; forecast fees and incentive schedules still apply."}
+            </small>
+          </label>
           {allocationSettings.power.trim() === "" && (
             <p className="simulation-reference">
               Reference scenario: 1,000 additional power. Enter your intended
@@ -1900,24 +2181,48 @@ function Simulator({
               <Badge tone="warn">Hypothetical</Badge>
             </div>
             <div className="earnings">
-              <span>Baseline earnings · next 48 hours</span>
+              <span>
+                {SCENARIO_LABELS[basis]}
+                {customTiming ? " with your timing" : ""} · next 48 hours
+              </span>
               <strong>{earningsMoney(outputs[0].earnings)}</strong>
               <p>
                 {outputs[0].error ??
                   `${pct(outputs[0].share === null ? null : outputs[0].share * 100)} initial share after your allocation`}
               </p>
-              {marketEstimate.earnings !== null ? (
+              {marketEstimate.earnings !== null && customTiming ? (
                 <p className="market-estimate-note">
-                  Markets estimate:{" "}
-                  <b>{earningsMoney(marketEstimate.earnings)}</b> · uses
-                  projected competing power, immediate allocation and constant
-                  own power. The baseline here uses current competing power and
-                  your timing inputs.
+                  Saved timing and stake decay are applied. Markets assumes
+                  immediate allocation and constant power (
+                  {earningsMoney(
+                    basis === "stress"
+                      ? marketEstimate.stress
+                      : marketEstimate.earnings,
+                  )}
+                  {basis === "stress" ? " stress" : " estimate"}).{" "}
+                  <button
+                    className="text-link"
+                    onClick={() =>
+                      setFields({
+                        ...fields,
+                        activationDelayHours: "0",
+                        remainingDays: "",
+                      })
+                    }
+                  >
+                    Use immediate, constant power
+                  </button>
+                </p>
+              ) : marketEstimate.earnings === null ? (
+                <p className="market-estimate-note">
+                  Comparable earnings are unavailable: {marketEstimate.reason}.
                 </p>
               ) : (
                 <p className="market-estimate-note">
-                  Markets comparison unavailable: {marketEstimate.reason}. This
-                  simulator remains a hypothetical scenario.
+                  Immediate allocation, constant own power.{" "}
+                  {basis === "current"
+                    ? "Current competition is an alternative assumption."
+                    : "Matches the selected Markets figure."}
                 </p>
               )}
             </div>
@@ -1933,10 +2238,19 @@ function Simulator({
               </div>
               <div>
                 <span>Pool eligible fee forecast</span>
-                <b>{money(row.forecast.projectedFees)}</b>
+                <b>
+                  {money(
+                    row.forecast.projectedFees === null
+                      ? null
+                      : row.forecast.projectedFees *
+                          (basis === "stress" ? 0.5 : 1),
+                  )}
+                </b>
                 <small>
                   {row.forecast.basis === "history"
-                    ? "Conservative history heuristic"
+                    ? basis === "stress"
+                      ? "History forecast reduced by 50%"
+                      : "Conservative history heuristic"
                     : "Current baseline · insufficient history"}
                 </small>
               </div>
@@ -1952,8 +2266,8 @@ function Simulator({
               <div>
                 <h2>What changes your return?</h2>
                 <p>
-                  Competing allocation shocks apply immediately to other
-                  allocators.
+                  Additional shocks apply to the selected starting scenario.
+                  Your timing inputs apply to every row.
                 </p>
               </div>
             </div>
@@ -1964,19 +2278,15 @@ function Simulator({
                     <th>Scenario</th>
                     <th>Your earnings / 48h</th>
                     <th>Capital APR</th>
-                    <th>vs. baseline</th>
+                    <th>vs. starting scenario</th>
                   </tr>
                 </thead>
                 <tbody>
                   {outputs.map((s, i) => (
                     <tr key={s.label}>
                       <td>
-                        {s.label}
-                        {i === 0 && (
-                          <small>
-                            Fixed competing power, scheduled revenue
-                          </small>
-                        )}
+                        {i === 0 ? SCENARIO_LABELS[basis] : s.label}
+                        {i === 0 && <small>Selected starting scenario</small>}
                       </td>
                       <td className="emphasis">{earningsMoney(s.earnings)}</td>
                       <td>{pct(s.apr)}</td>
@@ -2006,9 +2316,11 @@ function Simulator({
               revenue, including incentive token value.
             </p>
             <p>
-              Markets and Opportunities use the allocation forecast when history
-              is sufficient. This simulator starts competing power from the
-              current observation, so its baseline can differ.
+              Markets estimate and Markets stress use the same projected
+              competing power and forecast cutoff as the comparison you opened.
+              Current competition is an explicit alternative. Timing and stake
+              decay can change your result; the selected starting scenario is
+              included in the link, while personal inputs stay on your device.
             </p>
             <p>
               Competition scenarios hold other power constant after the
@@ -2056,11 +2368,12 @@ function Performance({
     return <div className="loading">Evaluating stored forecast windows…</div>;
   const done = data.evaluations.filter((e) => e.status === "proxy"),
     pending = data.evaluations.filter((e) => e.status === "pending");
+  const summary = performanceSummary(data.evaluations, data.decisions);
   const mean = (key: "revenueError" | "returnError") => {
     const a = done.flatMap((e) => (e[key] === null ? [] : [e[key]!]));
     return a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   };
-  const byId = new Map(data.evaluations.map((e) => [e.forecastId, e]));
+  const { byId, paired, cohorts, counts } = summary;
   const pools = new Map(rows.map((r) => [r.snapshot.id, r.snapshot]));
   const priority = { proxy: 0, insufficient: 1, pending: 2 };
   const ledger = data.evaluations
@@ -2069,35 +2382,45 @@ function Performance({
       (a, b) => priority[a.status] - priority[b.status] || b.dueAt - a.dueAt,
     );
   const pages = Math.max(1, Math.ceil(ledger.length / 25));
-  const benchmarkNames: Record<string, string> = {
-    persistence: "Persistence stress ranking",
-    highestApr: "Highest current Stake APR",
-    highestRewards: "Highest estimated pool rewards",
-    highestFees: "Highest eligible fee estimate",
-  };
+  const currentPage = Math.min(page, pages - 1);
   return (
     <>
       <div className="stat-grid">
         <Stat
-          label="Frozen forecasts stored"
-          value={number(data.totalStored)}
-          detail="Inputs and model saved at prediction time"
+          label="Forecasts in this view"
+          value={number(data.evaluations.length)}
+          detail={`${number(data.totalStored)} frozen forecasts stored overall`}
         />
         <Stat
-          label="Evaluated return proxies"
+          label="Evaluated in this view"
           value={number(done.length)}
-          detail="Require mature windows and adequate coverage"
+          detail={`${number(counts.proxy + counts.insufficient)} mature windows in this sample`}
         />
         <Stat
           label="Revenue mean absolute error"
           value={money(mean("revenueError"))}
-          detail="Versus the observed-window proxy"
+          detail="Evaluated sample · observed-window proxy"
         />
         <Stat
           label="Return mean absolute error"
           value={money(mean("returnError"))}
-          detail="USD / 1,000 additional power"
+          detail="Evaluated sample · USD / 1,000 additional power"
         />
+      </div>
+      <div className="performance-scope">
+        <b>This page shows a sample of the forecast archive.</b>
+        <p>
+          {number(counts.proxy)} evaluated · {number(counts.pending)} awaiting
+          48h · {number(counts.insufficient)} with incomplete observations.
+          These counts and errors describe this view, not all{" "}
+          {number(data.totalStored)} stored forecasts.
+        </p>
+        {summary.firstDue !== null && (
+          <p>
+            Forecast maturity range: {date(summary.firstDue)} →{" "}
+            {date(summary.lastDue!)}. {data.scope}
+          </p>
+        )}
       </div>
       {done.length === 0 && (
         <div className="notice warning">
@@ -2123,6 +2446,45 @@ function Performance({
             </p>
           </div>
         </div>
+        <div className="benchmark-coverage">
+          <b>
+            {paired.length} of {data.decisions.length} selection groups can be
+            compared across all four rules.
+          </b>
+          <p>
+            A group needs a saved choice and a completed return proxy for every
+            rule at the same collection time.
+          </p>
+          {paired.length !== data.decisions.length && (
+            <ul>
+              {cohorts.missingSelection > 0 && (
+                <li>
+                  {cohorts.missingSelection} groups lack at least one original
+                  selection. The persistence rule requires enough history before
+                  it can select a pool.
+                </li>
+              )}
+              {cohorts.pending > 0 && (
+                <li>
+                  {cohorts.pending} groups still have a forecast awaiting its
+                  48-hour window.
+                </li>
+              )}
+              {cohorts.missingEvaluation > 0 && (
+                <li>
+                  {cohorts.missingEvaluation} groups have a selected forecast
+                  outside the evaluations available in this view.
+                </li>
+              )}
+              {cohorts.incomplete > 0 && (
+                <li>
+                  {cohorts.incomplete} groups have incomplete observations for
+                  at least one selected pool.
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
         <div className="table-scroll">
           <table>
             <thead>
@@ -2134,15 +2496,7 @@ function Performance({
               </tr>
             </thead>
             <tbody>
-              {Object.entries(benchmarkNames).map(([key, label]) => {
-                // Compare strategies only on identical, fully evaluated cohorts.
-                const paired = data.decisions.filter((d) =>
-                  Object.keys(benchmarkNames).every(
-                    (k) =>
-                      d.choices[k] &&
-                      byId.get(d.choices[k]!)?.status === "proxy",
-                  ),
-                );
+              {Object.entries(BENCHMARK_NAMES).map(([key, label]) => {
                 const e = paired.map((d) => byId.get(d.choices[key]!)!);
                 return (
                   <tr key={key}>
@@ -2151,10 +2505,8 @@ function Performance({
                     <td>
                       {money(
                         e.length
-                          ? e.reduce(
-                              (s, e) => s + (e.observedReturnProxy ?? 0),
-                              0,
-                            ) / e.length
+                          ? e.reduce((s, e) => s + e.observedReturnProxy!, 0) /
+                              e.length
                           : null,
                       )}
                     </td>
@@ -2210,53 +2562,60 @@ function Performance({
               </tr>
             </thead>
             <tbody>
-              {ledger.slice(page * 25, (page + 1) * 25).map((e) => (
-                <tr key={e.forecastId}>
-                  <td>
-                    <b>
-                      {pools.has(e.poolId)
-                        ? `${pools.get(e.poolId)!.token0.symbol}/${pools.get(e.poolId)!.token1.symbol}`
-                        : "Pool"}
-                    </b>
-                    <small>
-                      <code title={e.poolId}>{short(e.poolId)}</code>
-                    </small>
-                    <small>{date(e.dueAt)}</small>
-                  </td>
-                  <td>
-                    {money(e.projectedRevenue)} →{" "}
-                    {money(e.observedRevenueProxy)}
-                  </td>
-                  <td>
-                    {money(e.revenueError)}
-                    <small>{pct(e.revenuePctError)}</small>
-                  </td>
-                  <td>
-                    {number(e.projectedAllocation, true)} →{" "}
-                    {number(e.observedAllocation, true)}
-                  </td>
-                  <td>
-                    {number(e.allocationError, true)}
-                    <small>{pct(e.allocationPctError)}</small>
-                  </td>
-                  <td>
-                    {money(e.estimatedReturn)} → {money(e.observedReturnProxy)}
-                  </td>
-                  <td>
-                    {money(e.returnError)}
-                    <small>{pct(e.returnPctError)}</small>
-                  </td>
-                  <td title={e.reason}>
-                    <Badge tone={e.status === "proxy" ? "good" : "warn"}>
-                      {e.status === "proxy"
-                        ? "Evaluated proxy"
-                        : e.status === "pending"
-                          ? "Awaiting 48h"
-                          : "Incomplete data"}
-                    </Badge>
-                  </td>
-                </tr>
-              ))}
+              {ledger
+                .slice(currentPage * 25, (currentPage + 1) * 25)
+                .map((e) => (
+                  <tr key={e.forecastId}>
+                    <td>
+                      <b>
+                        {pools.has(e.poolId)
+                          ? `${pools.get(e.poolId)!.token0.symbol}/${pools.get(e.poolId)!.token1.symbol}`
+                          : "Pool"}
+                      </b>
+                      <small>
+                        <code title={e.poolId}>{short(e.poolId)}</code>
+                      </small>
+                      <small>{date(e.dueAt)}</small>
+                    </td>
+                    <td>
+                      {money(e.projectedRevenue)} →{" "}
+                      {money(e.observedRevenueProxy)}
+                    </td>
+                    <td>
+                      {money(e.revenueError)}
+                      <small>{pct(e.revenuePctError)}</small>
+                    </td>
+                    <td>
+                      {number(e.projectedAllocation, true)} →{" "}
+                      {number(e.observedAllocation, true)}
+                    </td>
+                    <td>
+                      {number(e.allocationError, true)}
+                      <small>{pct(e.allocationPctError)}</small>
+                    </td>
+                    <td>
+                      {money(e.estimatedReturn)} →{" "}
+                      {money(e.observedReturnProxy)}
+                    </td>
+                    <td>
+                      {money(e.returnError)}
+                      <small>{pct(e.returnPctError)}</small>
+                    </td>
+                    <td>
+                      <Badge tone={e.status === "proxy" ? "good" : "warn"}>
+                        {e.status === "proxy"
+                          ? "Evaluated proxy"
+                          : e.status === "pending"
+                            ? "Awaiting 48h"
+                            : "Incomplete data"}
+                      </Badge>
+                      <details className="evaluation-reason">
+                        <summary>Why this status?</summary>
+                        <p>{e.reason}</p>
+                      </details>
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>
@@ -2265,18 +2624,18 @@ function Performance({
           <div>
             <button
               aria-label="Previous forecast page"
-              disabled={page === 0}
-              onClick={() => setPage((p) => p - 1)}
+              disabled={currentPage === 0}
+              onClick={() => setPage(currentPage - 1)}
             >
               ←
             </button>
             <span>
-              {page + 1} / {pages}
+              {currentPage + 1} / {pages}
             </span>
             <button
               aria-label="Next forecast page"
-              disabled={page >= pages - 1}
-              onClick={() => setPage((p) => p + 1)}
+              disabled={currentPage >= pages - 1}
+              onClick={() => setPage(currentPage + 1)}
             >
               →
             </button>

@@ -31,10 +31,6 @@ export function AllocationSize({
               ? "Comparing 1,000 additional power"
               : "Comparing your intended total in each pool"}
         </b>
-        <p>
-          Immediate allocation, constant power. Existing power set in Simulator
-          is remembered per pool. Timing and decay can be explored there.
-        </p>
       </div>
       {!reference && (
         <button className="text-link" onClick={() => onChange("")}>
@@ -43,6 +39,10 @@ export function AllocationSize({
       )}
       <details className="comparison-assumptions">
         <summary>How earnings and stress are calculated</summary>
+        <p>
+          Immediate allocation, constant power. Existing power set in Simulator
+          is remembered per pool. Timing and decay can be explored there.
+        </p>
         <p>
           Your intended power ÷ (projected other power + your intended power) ×
           modeled pool revenue. Existing power is removed before projecting

@@ -1,5 +1,28 @@
 import type { MarketRow } from "../shared/types.js";
 
+export function matchesPool({ snapshot: s }: MarketRow, query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (/^\d+:0x[\da-f]{40}$/.test(normalized))
+    return s.id.toLowerCase() === normalized;
+  const text = [
+    s.token0.symbol,
+    s.token1.symbol,
+    s.token0.address,
+    s.token1.address,
+    s.chain,
+    s.chainId,
+    s.address,
+    s.id,
+    s.poolType > 0 ? "CL" : "Basic",
+  ]
+    .join(" ")
+    .toLowerCase();
+  return normalized
+    .split(/[\s/·,]+/)
+    .filter(Boolean)
+    .every((term) => text.includes(term));
+}
+
 export function findPools(
   rows: MarketRow[],
   query: string,
@@ -8,32 +31,16 @@ export function findPools(
   watchOnly = false,
 ): MarketRow[] {
   const normalized = query.trim().toLowerCase();
-  const terms = normalized.split(/[\s/·,]+/).filter(Boolean);
   const watched = new Set(watch);
-  const fullIdentity = /^\d+:0x[\da-f]{40}$/.test(normalized);
   const exactPool = (row: MarketRow) =>
     normalized !== "" &&
     (row.snapshot.id.toLowerCase() === normalized ||
       row.snapshot.address.toLowerCase() === normalized);
   return rows
-    .filter(({ snapshot: s }) => {
-      if (fullIdentity && s.id.toLowerCase() !== normalized) return false;
-      if (watchOnly && !watched.has(s.id)) return false;
-      const text = [
-        s.token0.symbol,
-        s.token1.symbol,
-        s.token0.address,
-        s.token1.address,
-        s.chain,
-        s.chainId,
-        s.address,
-        s.id,
-        s.poolType > 0 ? "CL" : "Basic",
-      ]
-        .join(" ")
-        .toLowerCase();
-      return terms.every((term) => text.includes(term));
-    })
+    .filter(
+      (row) =>
+        (!watchOnly || watched.has(row.snapshot.id)) && matchesPool(row, query),
+    )
     .sort(
       (a, b) =>
         Number(exactPool(b)) - Number(exactPool(a)) ||
