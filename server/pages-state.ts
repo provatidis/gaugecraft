@@ -10,7 +10,7 @@ import {
   migrateDatabase,
   verifyDatabase,
 } from "./storage-maintenance.js";
-import { version } from "./storage-schema.js";
+import { STORAGE_VERSION, version } from "./storage-schema.js";
 
 import { databasePath } from "./store.js";
 import { dirname } from "node:path";
@@ -155,14 +155,15 @@ if (process.argv.includes("restore")) {
   const check = new DatabaseSync(restored, { readOnly: true });
   const oldVersion = version(check);
   check.close();
-  if (oldVersion !== 3) {
+  if (oldVersion !== STORAGE_VERSION && r) {
     // Retain a permanent pre-migration rollback asset outside rolling retention.
-    if (r)
-      await uploadBackup(
-        r,
-        `gaugecraft-pre-v3-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}.sqlite.gz`,
-        download,
-      );
+    await uploadBackup(
+      r,
+      `gaugecraft-pre-v${STORAGE_VERSION}-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}.sqlite.gz`,
+      download,
+    );
+  }
+  if (oldVersion !== STORAGE_VERSION && oldVersion !== 3) {
     const report = await migrateDatabase(restored, `${path}.migrated`);
     console.log(
       `Verified storage migration: ${report.beforeBytes} → ${report.afterBytes} bytes; all record fingerprints unchanged.`,

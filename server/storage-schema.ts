@@ -1,11 +1,15 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Forecast, Snapshot } from "../src/shared/types.js";
-import { decode, digest, encode } from "./storage-codec.js";
+import { digest, RecordCodec, recordTables } from "./storage-codec.js";
 
-export const STORAGE_VERSION = 3;
+export const STORAGE_VERSION = 4;
 export function version(db: DatabaseSync) {
   return Number(db.prepare("PRAGMA user_version").get()!.user_version);
 }
+const packing = `
+CREATE TABLE IF NOT EXISTS storage_dictionaries(kind TEXT PRIMARY KEY,body BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS storage_repack(kind TEXT PRIMARY KEY,last_rowid INTEGER NOT NULL,through_rowid INTEGER NOT NULL);
+`;
 const schema = `
 CREATE TABLE raw_evidence(hash TEXT PRIMARY KEY, body BLOB NOT NULL);
 CREATE TABLE snapshots(mode TEXT NOT NULL,pool_id TEXT NOT NULL,bucket INTEGER NOT NULL,at INTEGER NOT NULL,chain_id INTEGER NOT NULL,block TEXT NOT NULL,body BLOB NOT NULL,input_hash TEXT NOT NULL UNIQUE,raw_hash TEXT NOT NULL REFERENCES raw_evidence(hash),PRIMARY KEY(mode,pool_id,bucket));
@@ -25,6 +29,24 @@ CREATE TABLE IF NOT EXISTS decisions(mode TEXT NOT NULL,bucket INTEGER NOT NULL,
 export function initialize(db: DatabaseSync) {
   const v = version(db);
   if (v === STORAGE_VERSION) return;
+  if (v === 3) {
+    // Metadata only. Existing rows keep their original gzip encoding until repacked.
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(packing);
+      for (const table of recordTables) {
+        db.prepare(
+          `INSERT OR IGNORE INTO storage_repack(kind,last_rowid,through_rowid)
+          SELECT ?,0,coalesce(max(rowid),0) FROM ${table}`,
+        ).run(table);
+      }
+      db.exec(`PRAGMA user_version=${STORAGE_VERSION}; COMMIT`);
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+    return;
+  }
   if (
     v !== 0 ||
     db.prepare("SELECT name FROM sqlite_master WHERE type='table'").get()
@@ -33,7 +55,7 @@ export function initialize(db: DatabaseSync) {
       `Storage version ${v} needs an offline migration. Run pnpm storage:migrate SOURCE DESTINATION; keep the source as a rollback copy.`,
     );
   db.exec(
-    `BEGIN IMMEDIATE; ${schema} ${operational} PRAGMA user_version=3; COMMIT;`,
+    `BEGIN IMMEDIATE; ${schema} ${operational} ${packing} PRAGMA user_version=4; COMMIT;`,
   );
 }
 
@@ -42,13 +64,18 @@ export function initialize(db: DatabaseSync) {
 export function migrateSchema(db: DatabaseSync) {
   const v = version(db);
   if (v === STORAGE_VERSION) return false;
+  if (v === 3) {
+    initialize(db);
+    return true;
+  }
   if (v !== 2) throw new Error(`Unsupported migration source version ${v}`);
   db.exec("BEGIN IMMEDIATE");
   try {
     db.exec(`DROP INDEX snapshot_history; DROP INDEX forecast_dates;
       ALTER TABLE snapshots RENAME TO old_snapshots;
       ALTER TABLE forecasts RENAME TO old_forecasts;
-      ${schema} ${operational}`);
+      ${schema} ${operational} ${packing}`);
+    const codec = new RecordCodec(db);
     const raw = db.prepare("INSERT OR IGNORE INTO raw_evidence VALUES(?,?)");
     const insert = db.prepare(
       "INSERT INTO snapshots VALUES(?,?,?,?,?,?,?,?,?)",
@@ -56,10 +83,10 @@ export function migrateSchema(db: DatabaseSync) {
     for (const r of db
       .prepare("SELECT * FROM old_snapshots ORDER BY mode,pool_id,bucket")
       .iterate()) {
-      const s = decode<Snapshot>(r.body);
+      const s = codec.decode<Snapshot>("snapshots", r.body);
       const { raw: evidence, ...metrics } = s;
       const rawHash = digest(evidence);
-      raw.run(rawHash, encode(evidence));
+      raw.run(rawHash, codec.encode("raw_evidence", evidence));
       insert.run(
         r.mode,
         r.pool_id,
@@ -67,7 +94,7 @@ export function migrateSchema(db: DatabaseSync) {
         r.at,
         r.chain_id,
         r.block,
-        encode(metrics),
+        codec.encode("snapshots", metrics),
         digest(s),
         rawHash,
       );
@@ -79,7 +106,7 @@ export function migrateSchema(db: DatabaseSync) {
     for (const r of db
       .prepare("SELECT * FROM old_forecasts ORDER BY id")
       .iterate()) {
-      const f = decode<Forecast>(r.body);
+      const f = codec.decode<Forecast>("forecasts", r.body);
       const hash = digest(f.input);
       if (!input.get(hash, f.mode, f.poolId))
         throw new Error(
@@ -92,14 +119,14 @@ export function migrateSchema(db: DatabaseSync) {
         r.pool_id,
         r.made_at,
         r.due_at,
-        encode(result),
+        codec.encode("forecasts", result),
         hash,
       );
     }
     if (db.prepare("PRAGMA foreign_key_check").get())
       throw new Error("Migration reference check failed");
     db.exec(
-      "DROP TABLE old_forecasts; DROP TABLE old_snapshots; PRAGMA user_version=3; COMMIT;",
+      "DROP TABLE old_forecasts; DROP TABLE old_snapshots; PRAGMA user_version=4; COMMIT;",
     );
     return true;
   } catch (error) {

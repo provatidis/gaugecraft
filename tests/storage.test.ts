@@ -4,9 +4,12 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm, readFile, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { gunzipSync } from "node:zlib";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { createServer, get as httpGet } from "node:http";
 import type { AddressInfo } from "node:net";
+import { RecordCodec, recordTables } from "../server/storage-codec.js";
+import { repackRecords } from "../server/storage-repack.js";
+import { version } from "../server/storage-schema.js";
 import { Store } from "../server/store.js";
 import { demoSnapshot } from "../server/demo.js";
 import { forecast } from "../src/analysis/forecast.js";
@@ -101,7 +104,8 @@ test("offline migration preserves every logical record and refuses to overwrite 
       .prepare("SELECT body,input_hash FROM forecasts LIMIT 1")
       .get()!;
     assert.equal(
-      JSON.parse(gunzipSync(data.body as Uint8Array).toString()).input,
+      new RecordCodec(db.db).decode<{ input?: unknown }>("forecasts", data.body)
+        .input,
       undefined,
     );
     assert.equal(
@@ -234,13 +238,19 @@ test("hosted API remains read-only, distinguishes liveness from stale data, and 
     { ...demoSnapshot(t), mode: "live" },
     { ...demoSnapshot(t - 31 * 86400), mode: "live" },
   ]);
+  let clock = t + 76 * 60;
+  const frozen = t - 90 * 86400;
+  db.ingest([
+    demoSnapshot(t, 1),
+    ...[0, 1, 2, 30, 31].map((days) => demoSnapshot(frozen - days * 86400)),
+  ]);
   const server = createServer(
     handler(db, {
       hosts: ["127.0.0.1"],
       origins: ["https://provatidis.com"],
       collectorEnabled: false,
       database: path,
-      now: () => t + 76 * 60,
+      now: () => clock,
     }),
   );
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -272,7 +282,57 @@ test("hosted API remains read-only, distinguishes liveness from stale data, and 
       state.headers.get("access-control-allow-origin"),
       "https://provatidis.com",
     );
-    assert.equal((await state.json()).collectionKind, "persistent-service");
+    const full = await state.json();
+    assert.equal(full.collectionKind, "persistent-service");
+    const url = `${root}/api/state?view=overview`;
+    const first = await fetch(url);
+    const etag = first.headers.get("etag")!;
+    assert.equal(first.headers.get("content-encoding"), "gzip");
+    const overview = await first.json();
+    const { coverage, forecast, ...row } = full.markets[0];
+    const { input, ...compactForecast } = forecast;
+    assert.deepEqual(input, row.snapshot);
+    assert.deepEqual(overview.markets, [{ ...row, forecast: compactForecast }]);
+    assert.deepEqual(
+      await (
+        await fetch(`${root}/api/coverage?pool=${row.snapshot.id}&at=${t}`)
+      ).json(),
+      coverage,
+    );
+    assert.equal(
+      (await fetch(`${root}/api/coverage?pool=${row.snapshot.id}&at=${t + 1}`))
+        .status,
+      404,
+    );
+    clock += 60;
+    const validate = () => fetch(url, { headers: { "If-None-Match": etag } });
+    const unchanged = await validate();
+    assert.equal(unchanged.status, 304);
+    assert.equal(await unchanged.text(), "");
+    assert.equal((await (await fetch(`${root}/api/state`)).json()).now, clock);
+    const identity = await fetch(url, {
+      headers: { "Accept-Encoding": "gzip;q=0, *;q=1" },
+    });
+    assert.equal(identity.headers.get("content-encoding"), null);
+    assert.equal(identity.headers.get("etag"), etag);
+    const run = db.startRun(8453, "live", clock);
+    const started = await validate();
+    assert.equal((await started.json()).runs[0].status, "running");
+    db.finishRun(run, "error", 0, "unavailable", clock);
+    const ended = await fetch(url, {
+      headers: { "If-None-Match": started.headers.get("etag")! },
+    });
+    assert.equal((await ended.json()).runs[0].status, "error");
+    const perfUrl = `${root}/api/performance`;
+    const pending = await fetch(perfUrl);
+    assert.equal((await pending.json()).evaluations[0].status, "pending");
+    clock = t + 48 * 3600;
+    const mature = await fetch(perfUrl, {
+      headers: { "If-None-Match": pending.headers.get("etag")! },
+    });
+    assert.equal(mature.status, 200);
+    assert.equal((await mature.json()).evaluations[0].status, "insufficient");
+    clock = t + 76 * 60;
     assert.equal(
       (await fetch(`${root}/api/export.csv`)).headers.get("content-type"),
       "text/csv; charset=utf-8",
@@ -285,6 +345,50 @@ test("hosted API remains read-only, distinguishes liveness from stale data, and 
     ).json();
     assert.equal(history.length, 1);
     assert.equal(history[0].raw, undefined);
+    for (const days of [1, 2]) {
+      const fixturePoints = await (
+        await fetch(
+          `${root}/api/history?mode=demo&pool=${demoSnapshot(frozen).id}&days=${days}`,
+        )
+      ).json();
+      assert.deepEqual(
+        fixturePoints.map((p: { observedAt: number }) => p.observedAt),
+        days === 1
+          ? [frozen - 86400, frozen]
+          : [frozen - 172800, frozen - 86400, frozen],
+      );
+    }
+    const sampleCsv = await (
+      await fetch(`${root}/api/export.csv?mode=demo`)
+    ).text();
+    const lines = sampleCsv.trim().split("\n");
+    assert.equal(lines.length, 6);
+    assert.ok(
+      lines[1].includes(new Date((frozen - 30 * 86400) * 1000).toISOString()),
+    );
+    assert.ok(lines.at(-1)!.includes(new Date(t * 1000).toISOString()));
+    const writer = new Store(path);
+    try {
+      writer.ingest(
+        [{ ...demoSnapshot(t + 1800), mode: "live", allocation: 71 }],
+        false,
+      );
+      const changed = await fetch(url, {
+        headers: { "If-None-Match": ended.headers.get("etag")! },
+      });
+      const [next] = (await changed.json()).markets;
+      assert.equal(next.snapshot.allocation, 71);
+      assert.equal(next.forecast.madeAt, t + 1800);
+      // A detail opened just before collection must keep the original cutoff.
+      assert.deepEqual(
+        await (
+          await fetch(`${root}/api/coverage?pool=${row.snapshot.id}&at=${t}`)
+        ).json(),
+        coverage,
+      );
+    } finally {
+      writer.close();
+    }
     assert.equal(
       (
         await fetch(`${root}/api/state`, {
@@ -297,6 +401,128 @@ test("hosted API remains read-only, distinguishes liveness from stale data, and 
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("v3 upgrade, interrupted repack, mixed-format backups and rollback preserve every frozen record", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "gc-storage-v4-"));
+  const path = join(dir, "mixed.sqlite");
+  try {
+    let store = new Store(path);
+    for (let i = 0; i < 9; i++)
+      store.ingest([
+        {
+          ...demoSnapshot(t + i * 1800),
+          raw: { proof: "αβ".repeat(100), index: i },
+        },
+      ]);
+    store.saveDecision("demo", t + 8 * 1800);
+    const codec = new RecordCodec(store.db);
+    // Reconstruct the exact v3 tables and encoding that existing deployments use.
+    for (const table of recordTables) {
+      const rows = store.db.prepare(`SELECT rowid,body FROM ${table}`).all();
+      const write = store.db.prepare(
+        `UPDATE ${table} SET body=? WHERE rowid=?`,
+      );
+      for (const row of rows)
+        write.run(
+          gzipSync(codec.expand(table, row.body as Uint8Array)),
+          row.rowid,
+        );
+    }
+    store.db.exec(
+      "DROP TABLE storage_repack; DROP TABLE storage_dictionaries; PRAGMA user_version=3",
+    );
+    store.close();
+
+    const before = fingerprint(path);
+    const reader = new Store(path, { readOnly: true });
+    assert.equal(version(reader.db), 3);
+    assert.equal(reader.forecasts("demo").length, 9);
+    reader.close();
+    store = new Store(path);
+    assert.equal(version(store.db), 4);
+    assert.equal(
+      store.db.prepare("SELECT count(*) n FROM storage_dictionaries").get()!.n,
+      0,
+    );
+    assert.deepEqual(fingerprint(path), before);
+    const ids = () =>
+      recordTables.map((table) =>
+        store.db.prepare(`SELECT rowid FROM ${table} ORDER BY rowid`).all(),
+      );
+    const initialIds = ids();
+    assert.equal((await repackRecords(store.db, 3, false)).rewritten, 3);
+    store.close();
+
+    const saved = join(dir, "mixed.gz"),
+      restore = join(dir, "restored.sqlite");
+    await createBackup(path, saved);
+    await restoreBackup(saved, restore);
+    assert.deepEqual(fingerprint(restore), before);
+    store = new Store(restore);
+    while (!(await repackRecords(store.db, 3, false)).complete) {
+      /* resume */
+    }
+    assert.deepEqual(ids(), initialIds);
+    assert.deepEqual(fingerprint(restore), before);
+    store.ingest([demoSnapshot(t + 10 * 1800)]);
+    assert.equal((await repackRecords(store.db, 3, false)).scanned, 0);
+    const after = fingerprint(restore);
+    store.close();
+
+    const rollback = join(dir, "rollback.sqlite");
+    await migrateDatabase(restore, rollback, 3);
+    assert.deepEqual(fingerprint(rollback), after);
+    const old = new DatabaseSync(rollback, { readOnly: true });
+    assert.equal(version(old), 3);
+    for (const table of recordTables)
+      for (const row of old.prepare(`SELECT body FROM ${table}`).all())
+        assert.doesNotThrow(() =>
+          JSON.parse(gunzipSync(row.body as Uint8Array).toString()),
+        );
+    old.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("first-write dictionary rollback is safe to retry with a different pool", () => {
+  const store = new Store(":memory:");
+  try {
+    const first = demoSnapshot(t);
+    assert.throws(() => store.ingest([first, { ...first, id: "broken" }]));
+    assert.equal(
+      store.db.prepare("SELECT count(*) n FROM storage_dictionaries").get()!.n,
+      0,
+    );
+    const next = demoSnapshot(t, 1);
+    store.ingest([next]);
+    assert.deepEqual(store.latest("demo"), [next]);
+    assert.deepEqual(store.forecasts("demo"), [forecast(next, [next])]);
+  } finally {
+    store.close();
+  }
+});
+
+test("concurrent restores can only install one verified destination", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "gaugecraft-restore-race-"));
+  try {
+    const source = join(dir, "source.sqlite");
+    const store = new Store(source);
+    store.ingest([demoSnapshot(t)]);
+    store.close();
+    const backup = join(dir, "verified.gz");
+    await createBackup(source, backup);
+    const dest = join(dir, "restored.sqlite");
+    const results = await Promise.allSettled([
+      restoreBackup(backup, dest),
+      restoreBackup(backup, dest),
+    ]);
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+    assert.deepEqual(fingerprint(dest), fingerprint(source));
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });

@@ -43,3 +43,10 @@ test("invalid routes fall back safely and cap untrusted filter values", () => {
   assert.equal(readRoute("#markets?page=Infinity").market.page, 0);
   assert.equal(readRoute("#analysis", "demo").mode, "demo");
 });
+test("the landing shortlist keeps its network when linked directly", () => {
+  assert.equal(readRoute("").page, "opportunities");
+  const route = readRoute("#opportunities?mode=live&network=OP+Mainnet");
+  assert.equal(route.market.chain, "OP Mainnet");
+  assert.deepEqual(readRoute(routeHash(route)), route);
+  assert.equal(readRoute("#markets").page, "markets");
+});

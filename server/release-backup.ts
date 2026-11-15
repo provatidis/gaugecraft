@@ -101,7 +101,7 @@ export async function downloadReleaseDatabase(
   verifyDatabase(destination);
   const db = new DatabaseSync(destination, { readOnly: true });
   try {
-    if (version(db) !== STORAGE_VERSION)
+    if (![3, STORAGE_VERSION].includes(version(db)))
       throw new Error(
         "Collector storage must be migrated before enabling R2 backups",
       );

@@ -1,6 +1,11 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { PERSISTENCE_REQUIREMENTS as limits } from "../analysis/coverage.js";
-import type { PersistenceCoverage } from "../shared/types.js";
+import type {
+  MarketRow,
+  PersistenceCoverage,
+  Snapshot,
+} from "../shared/types.js";
+import { get, hosted } from "./data.js";
 
 const duration = (seconds: number) => {
   const whole = Math.max(0, Math.floor(seconds));
@@ -14,6 +19,65 @@ const duration = (seconds: number) => {
 };
 const utc = (at: number) =>
   new Date(at * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+
+export function PoolCoverage({ row }: { row: MarketRow }) {
+  if (row.coverage || hosted) return <Coverage coverage={row.coverage} />;
+  const s = row.snapshot;
+  return (
+    <LoadCoverage
+      key={`${s.mode}:${s.id}:${s.observedAt}:${s.retrievedAt}:${s.blockHash}`}
+      snapshot={s}
+    />
+  );
+}
+
+function LoadCoverage({ snapshot }: { snapshot: Snapshot }) {
+  const [coverage, setCoverage] = useState<PersistenceCoverage>();
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const { mode, id, observedAt, retrievedAt } = snapshot;
+  useEffect(() => {
+    const abort = new AbortController();
+    get<PersistenceCoverage>(
+      `/api/coverage?mode=${mode}&pool=${encodeURIComponent(id)}&at=${observedAt}`,
+      abort.signal,
+    )
+      .then((result) => {
+        if (
+          result.windowEnd !== observedAt ||
+          result.availableAt !== Math.max(observedAt, retrievedAt)
+        )
+          throw new Error("Coverage observation changed");
+        if (!abort.signal.aborted) setCoverage(result);
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) setFailed(true);
+      });
+    return () => abort.abort();
+  }, [mode, id, observedAt, retrievedAt, attempt]);
+  if (coverage) return <Coverage coverage={coverage} />;
+  return (
+    <section className="panel coverage-panel" aria-busy={!failed}>
+      <h2>Forecast readiness</h2>
+      <p role="status">
+        {failed
+          ? "Coverage diagnostics could not be loaded for this observation."
+          : "Loading this pool’s 48-hour coverage…"}
+      </p>
+      {failed && (
+        <button
+          className="button"
+          onClick={() => {
+            setFailed(false);
+            setAttempt(attempt + 1);
+          }}
+        >
+          Retry coverage
+        </button>
+      )}
+    </section>
+  );
+}
 
 export function Coverage({ coverage }: { coverage?: PersistenceCoverage }) {
   if (!coverage)

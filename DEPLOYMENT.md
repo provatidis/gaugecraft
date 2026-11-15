@@ -1,12 +1,14 @@
 # Persistent hosting and storage
 
-Status: compact storage is in use, and a real R2 backup and complete recovery were verified on October 24, 2026. The independent daily GitHub backup workflow is configured. A replacement persistent collector host, external monitors and the 48-hour operational observation period remain outstanding; Railway provisioning is deferred. GitHub Actions remains the public collector.
+On November 15, 2026 the public Pages frontend was using the Railway API, which reported a persistent collector across seven networks and an enabled, current external backup. The daily GitHub release backup workflow applies to GitHub-hosted collection. Check the public [data health](https://gaugecraft-production.up.railway.app/health/data) and [storage health](https://gaugecraft-production.up.railway.app/health/storage) for the latest status.
 
 ## Storage contract
 
-Storage version 3 keeps every observation and frozen forecast. Snapshot metrics are compressed independently, raw source evidence is compressed and keyed by its SHA-256, and forecasts reference their exact immutable snapshot by content hash. Forecast outputs are compressed without recomputation. Mode, pool, timestamps and indexes remain directly queryable. Compression operates on one record at a time, not the database as a whole.
+Storage v4 keeps the complete observation and forecast ledgers. Each database contains its own compression dictionaries for snapshot metrics, raw evidence and forecast outputs. Each record can be decoded individually. Forecasts continue to reference the exact immutable observation by content hash. New records use the compact encoding, and existing gzip records remain readable.
 
-Historical metadata is retained as observed. A missing or mismatched forecast input aborts migration; it is never repaired using today's values. Migration compares canonical hashes and counts of all observations, full forecasts including their inputs, runs and benchmark decisions. SQLite integrity and foreign-key checks also run. The source file is retained. An old schema is refused by the application until explicitly migrated.
+Opening a v3 database for writing upgrades its metadata in a transaction and records the upper row ID of each historical table. In the persistent service, after a successful collection, up to 1,024 historical rows are scanned in batches of 128. Before replacing a body, the service decodes the new representation and checks exact byte equality. Batches restore the original row IDs before committing and save their progress in SQLite. Work yields between batches and pauses for a backup, shutdown, an approaching collection boundary or an accumulating WAL. `REPACK_ROWS_PER_COLLECTION=0` disables automatic historical repacking. New writes still use the compact encoding.
+
+Repacking makes SQLite pages reusable for subsequent writes. The on-disk file can stay the same size. Read `reusablePageBytes` and `databaseBytes` together in [storage health](https://gaugecraft-production.up.railway.app/health/storage). The explicit migration command below creates a physically smaller, verified copy on storage with space for a second database and SQLite’s temporary vacuum files.
 
 Raw evidence is retained in the database in this release. Daily external backups additionally publish a compressed JSONL evidence archive for the preceding 24 hours, with source blocks, timestamps and hashes. That convenience archive is not a complete independent history if a backup day was missed; full database backups retain the complete raw history. There is **no automatic history deletion or cold-storage eviction**. Implement and test retrieval from archives before ever introducing such a policy.
 
@@ -16,19 +18,23 @@ Run commands with Node 24 and the locked dependencies. Stop every process using 
 
 ```sh
 pnpm storage:report data/gaugecraft.sqlite
-pnpm storage:migrate data/gaugecraft.sqlite data/gaugecraft-v3.sqlite
-pnpm storage:backup data/gaugecraft-v3.sqlite data/gaugecraft-v3.sqlite.gz
-pnpm storage:restore data/gaugecraft-v3.sqlite.gz data/restore-test.sqlite
+pnpm storage:migrate data/gaugecraft.sqlite data/gaugecraft-v4.sqlite
+pnpm storage:backup data/gaugecraft-v4.sqlite data/gaugecraft-v4.sqlite.gz
+pnpm storage:restore data/gaugecraft-v4.sqlite.gz data/restore-test.sqlite
 node --import tsx server/storage-cli.ts verify data/restore-test.sqlite
 ```
 
 Keep the `.gz.json` checksum manifest with its `.gz`. Backups use the SQLite online backup API followed by streamed gzip; restoration streams into a new file and checks checksum, compressed and expanded sizes, SQLite integrity and references. No database-sized Buffer is used. Migration needs temporary disk headroom for the old and compacted copies and SQLite's VACUUM work.
 
-After verifying the report and stopping the old process, set `GAUGECRAFT_DB` to the new file. Do not run old code against a v3 file. Rollback means using the preserved old database with the old code; observations gathered after the handover must be reconciled explicitly, not silently discarded.
+To switch to a physically compacted copy, stop the writer before taking the final copy, verify its report, then set `GAUGECRAFT_DB` to the verified destination. Keep the original for recovery. To roll back the application after new v4 observations have arrived, run `pnpm storage:v3-copy SOURCE NEW_DESTINATION` with the v4 code on a volume with room for the expanded v3 database and vacuum work. The command preserves the newer observations, compares all canonical fingerprints and produces a v3 copy for the previous app. A verified restore to separate scratch storage also supports a recovery drill while collection continues.
 
-The GitHub transition path streams release downloads/uploads, migrates its downloaded copy, and retains a `gaugecraft-pre-v3-…sqlite.gz` rollback asset outside its rolling three-generation retention. Its original launch seed remains unchanged.
+For an explicit bounded pass on v3 history, `pnpm storage:repack SOURCE 1024` uses the same saved progress as the service. The GitHub static-mode migration path preserves a pre-upgrade release asset outside rolling retention.
 
 ## Capacity evidence
+
+On November 15 the production volume reported a 2.36 GB database and 1.41 GB of filesystem space free before v4. The online upgrade fits this layout without a second full database. Use separate scratch storage for an offline migration, compact copy or v3 rollback.
+
+On the 53,030,912-byte historical v3 sample described below, a full online pass produced 23,642,112 bytes of reusable SQLite pages. A separate compacted v4 copy occupied 28,786,688 bytes (45.7% smaller), and its compressed backup occupied 16,382,203 bytes. The logical fingerprints matched through migration and restore. Production savings depend on its mix of historical records and new writes.
 
 A consistent local copy measured on October 22, 2026 contained 10,070 live observations and forecasts, 1,685 fixture observations and forecasts, 164 collection runs and 359 decisions. Migration reduced its physical database from **118,562,816 to 53,030,912 bytes (55.27%)**. All logical record fingerprints were identical before migration, after migration and after backup restoration. The compressed backup was 27,212,287 bytes. This copy is a measurement sample, not the authoritative public history for cutover.
 
@@ -36,7 +42,7 @@ At 474 pools and 48 observations per pool per day, the measured blended physical
 
 A separate synthetic stress test backed up and restored a **2,216,857,600-byte database**, crossing the previous 2 GiB whole-buffer boundary. It completed with a 128 MiB Node heap limit and approximately **139 MiB peak process memory**, and verified restored row counts, payload sizes and SQLite integrity. Its zero-filled payload is deliberately highly compressible; this tests memory behavior and recovery, not realistic backup sizes. Synthetic records were never added to research history. Automated object-storage tests use an in-memory test double. A real R2 recovery was subsequently verified on October 24; see the verified recovery record below. Repeat the drill against the selected handover generation before migration.
 
-Plan for Railway Pro rather than treating a 5 GB Hobby volume as a long-term solution. Start with enough persistent capacity for the next 90 days plus headroom; the current Pro default is 50 GB. Backup temporary storage must have at least twice the active database size free. Enable disk alerts before reaching 80% use. Reassess retention and archival retrieval well before a year. [Railway volume limits](https://docs.railway.com/volumes/reference).
+Size the persistent volume using recent observed growth and reusable pages, with headroom for WAL and bursts in pool discovery. Backup temporary storage must have at least twice the active database size free. Enable disk alerts before reaching 80% use. Reassess retention and archival retrieval well before a year. [Railway volume limits](https://docs.railway.com/volumes/reference).
 
 ## Railway service
 
@@ -59,11 +65,13 @@ Bootstrap only runs if the configured database is missing. It verifies the backu
 
 The code has a 25-second graceful-shutdown deadline. Configure Railway's deployment draining period to at least 30 seconds. The collector waits for its current run on shutdown; a forced interruption remains visible as an interrupted run on recovery. Scheduling resumes at the next UTC half-hour boundary without fabricating missed history.
 
-The public API accepts GET/HEAD only, validates pool IDs, caches expensive views briefly, limits charts and HTTP CSV to 30 days, and streams CSV. Command-line CSV can stream full retained history. Personal simulator inputs never enter these requests.
+The public API accepts GET and HEAD. The dashboard requests `/api/state?mode=live&view=overview`, which returns one copy of each observation and its current forecast. Pool analysis retrieves rolling coverage for the selected observation through `/api/coverage?mode=live&pool=<pool-id>&at=<observedAt>`. The full `/api/state` response still includes all coverage and forecast inputs.
+
+The API builds an overview again when observations, forecasts or recent collection status change. The overview's `now` is its generation time. The browser checks freshness against its current clock. Performance also updates as forecast and decision windows mature. Both views support gzip and ETag revalidation. History and streamed HTTP CSV cover up to 30 days. Command-line CSV can stream full retained history. Simulator inputs stay on the device.
 
 ## R2 backups while the collector remains on GitHub
 
-The independent **Back up Gaugecraft to R2** workflow reads the latest complete `collector-state` release asset. It never substitutes the local measurement database, starts a collector, or creates empty history. The workflow uses the same concurrency lock as collection, checks GitHub's published SHA-256 and size, uploads a new private R2 generation, then downloads and restores it into a separate database. Success requires matching counts and canonical fingerprints for every observation, full frozen forecast, run and benchmark decision. A verified `recovery.json` receipt is uploaded only after that round trip succeeds.
+In GitHub collector mode, the independent **Back up GitHub collector release to R2** workflow reads the latest complete `collector-state` release asset. It never substitutes the local measurement database, starts a collector, or creates empty history. The workflow uses the same concurrency lock as collection, checks GitHub's published SHA-256 and size, uploads a new private R2 generation, then downloads and restores it into a separate database. Success requires matching counts and canonical fingerprints for every observation, full frozen forecast, run and benchmark decision. A verified `recovery.json` receipt is uploaded only after that round trip succeeds.
 
 Cloudflare setup:
 
@@ -112,7 +120,7 @@ R2_SECRET_ACCESS_KEY=<secret>
 The official S3 SDK uploads streams in bounded 8 MiB multipart chunks with concurrency two and retries. Each uploaded database and evidence archive is streamed back and checked against its local checksum before the complete manifest is published. The backup manifest contains no personal positions or credentials. [Cloudflare's S3 SDK configuration](https://developers.cloudflare.com/r2/examples/aws/aws-sdk-js-v3/).
 
 ```sh
-GAUGECRAFT_DB=data/gaugecraft-v3.sqlite pnpm backup:r2 save
+GAUGECRAFT_DB=data/gaugecraft-v4.sqlite pnpm backup:r2 save
 pnpm backup:r2 restore backups/<verified-generation> data/r2-restore-test.sqlite
 node --import tsx server/storage-cli.ts verify data/r2-restore-test.sqlite
 ```
@@ -144,9 +152,9 @@ Acceptance requires all seven networks collecting for at least 48 hours, source 
 
 No DNS migration is required for this first step. Passiko and the personal website remain independent.
 
-## Migration preflight while provisioning is deferred
+## Preflight for a future collector move
 
-The frontend is now `https://gaugecraft.sh`. Set the new backend's `CORS_ORIGINS` to that exact origin; the API hostname belongs in `ALLOWED_HOSTS`, not the frontend hostname. Keep `VITE_API_ORIGIN` unset on GitHub until the new HTTPS API passes read-only, CORS and data checks. The API hostname is not yet provisioned.
+The public frontend is `https://gaugecraft.sh`. For a replacement service, set its `CORS_ORIGINS` to that exact origin; the API hostname belongs in `ALLOWED_HOSTS`, not the frontend hostname. Keep the existing API origin until the replacement passes read-only, CORS and data checks.
 
 Before handover, record the selected GitHub release asset, its published SHA-256, its latest live observation timestamp and the verified R2 generation. Restore that exact generation into a separate database and compare all record fingerprints with the release source. Keep `COLLECT=0` on the replacement service during these checks. The local `data/migration/compact.sqlite` is an old measurement copy and must never be used as the public handover database.
 

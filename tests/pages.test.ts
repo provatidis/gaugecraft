@@ -13,6 +13,8 @@ test("Pages export preserves namespaces, historical values, frozen forecasts and
   const dir = await mkdtemp(join(tmpdir(), "gaugecraft-pages-"));
   const now = 1792656000;
   const sample = demoSnapshot(now);
+  const frozenEnd = now - 90 * 86400;
+  const olderFixture = demoSnapshot(frozenEnd, 1);
   const live = {
     ...sample,
     mode: "live" as const,
@@ -21,6 +23,9 @@ test("Pages export preserves namespaces, historical values, frozen forecasts and
   };
   db.ingest([
     sample,
+    olderFixture,
+    demoSnapshot(frozenEnd - 30 * 86400, 1),
+    demoSnapshot(frozenEnd - 31 * 86400, 1),
     live,
     { ...live, observedAt: now - 31 * 86400, retrievedAt: now - 31 * 86400 },
   ]);
@@ -34,11 +39,41 @@ test("Pages export preserves namespaces, historical values, frozen forecasts and
     assert.equal(state.markets.length, 1);
     assert.equal(state.markets[0].snapshot.mode, "live");
     assert.equal(state.markets[0].snapshot.allocation, 12345);
+    const overview = JSON.parse(
+      await readFile(join(dir, "data/live/overview.json"), "utf8"),
+    );
+    assert.equal(overview.markets[0].forecast.input, undefined);
+    overview.markets[0].forecast.input = overview.markets[0].snapshot;
+    assert.deepEqual(overview, state);
     const demo = JSON.parse(
       await readFile(join(dir, "data/demo/state.json"), "utf8"),
     );
     assert.equal(demo.markets[0].snapshot.mode, "demo");
     assert.notEqual(demo.markets[0].snapshot.allocation, 12345);
+    const fixtureChart = JSON.parse(
+      await readFile(
+        join(
+          dir,
+          `data/demo/history/${olderFixture.id.replace(":", "-")}.json`,
+        ),
+        "utf8",
+      ),
+    );
+    assert.deepEqual(
+      fixtureChart.map((p: { observedAt: number }) => p.observedAt),
+      [frozenEnd - 30 * 86400, frozenEnd],
+    );
+    const fixtureCsv = await readFile(
+      join(dir, "data/demo/observations.csv"),
+      "utf8",
+    );
+    assert.equal(fixtureCsv.trim().split("\n").length, 4);
+    assert.ok(fixtureCsv.includes(new Date(frozenEnd * 1000).toISOString()));
+    assert.ok(
+      !fixtureCsv.includes(
+        new Date((frozenEnd - 31 * 86400) * 1000).toISOString(),
+      ),
+    );
     const history = JSON.parse(
       await readFile(
         join(dir, `data/live/history/${live.id.replace(":", "-")}.json`),

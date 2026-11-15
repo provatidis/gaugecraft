@@ -1,4 +1,4 @@
-import type { MarketRow, Mode, Run, Snapshot } from "../shared/types.js";
+import type { Mode, Run, Snapshot } from "../shared/types.js";
 
 export const MAX_OBSERVATION_AGE = 75 * 60;
 export function isFresh(snapshot: Snapshot, now = Date.now() / 1000) {
@@ -9,7 +9,7 @@ export function isFresh(snapshot: Snapshot, now = Date.now() / 1000) {
 }
 
 export function dataHealth(
-  rows: MarketRow[],
+  rows: { snapshot: Snapshot }[],
   chains: number[],
   runs: Run[],
   mode: Mode,

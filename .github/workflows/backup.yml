@@ -1,4 +1,4 @@
-name: Back up Gaugecraft to R2
+name: Back up GitHub collector release to R2
 
 on:
   push:
@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   backup:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && vars.COLLECTOR_HOSTING != 'railway'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -35,7 +35,7 @@ jobs:
         run: |
           npm install --global pnpm@11.25.0
           pnpm install --frozen-lockfile
-      - name: Back up authoritative history and verify a complete R2 restore
+      - name: Back up the GitHub collector release and verify its R2 restore
         run: pnpm backup:github
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

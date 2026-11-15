@@ -12,11 +12,13 @@ export function PoolPicker({
   rows,
   select,
   watch,
+  purpose = "Change pool",
 }: {
-  row: MarketRow;
+  row?: MarketRow;
   rows: MarketRow[];
   select: (id: string) => void;
   watch: string[];
+  purpose?: string;
 }) {
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -26,9 +28,10 @@ export function PoolPicker({
   const [query, setQuery] = useState("");
   const [watchOnly, setWatchOnly] = useState(false);
   const [activeId, setActiveId] = useState("");
+  const current = row?.snapshot.id ?? "";
   const matches = useMemo(
-    () => findPools(rows, query, row.snapshot.id, watch, watchOnly),
-    [rows, query, row.snapshot.id, watch, watchOnly],
+    () => (open ? findPools(rows, query, current, watch, watchOnly) : []),
+    [open, rows, query, current, watch, watchOnly],
   );
   const visible = matches.slice(0, 12);
   const activeIndex = Math.max(
@@ -103,7 +106,11 @@ export function PoolPicker({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? `${id}-dialog` : undefined}
-        aria-label={`Change pool: ${pair(row)}, ${row.snapshot.chain}, ${row.snapshot.address}`}
+        aria-label={
+          row
+            ? `${purpose}: ${pair(row)}, ${row.snapshot.chain}, ${row.snapshot.address}`
+            : purpose
+        }
         onClick={() => {
           if (open) close();
           else {
@@ -114,11 +121,14 @@ export function PoolPicker({
         }}
       >
         <span className="pool-picker-selected">
-          <strong>{pair(row)}</strong>
-          <span>
-            {row.snapshot.chain} · {row.snapshot.poolType > 0 ? "CL" : "Basic"}{" "}
-            · {short(row.snapshot.address)}
-          </span>
+          <strong>{row ? pair(row) : purpose}</strong>
+          {row && (
+            <span>
+              {row.snapshot.chain} ·{" "}
+              {row.snapshot.poolType > 0 ? "CL" : "Basic"} ·{" "}
+              {short(row.snapshot.address)}
+            </span>
+          )}
         </span>
         <span className="pool-picker-action" aria-hidden="true">
           Find pool <span>⌕</span>
@@ -212,7 +222,7 @@ export function PoolPicker({
                   type="button"
                   role="option"
                   tabIndex={-1}
-                  aria-selected={r.snapshot.id === row.snapshot.id}
+                  aria-selected={r.snapshot.id === current}
                   aria-label={`${pair(r)}, ${r.snapshot.chain}, ${r.snapshot.poolType > 0 ? "CL" : "Basic"}, ${r.snapshot.address}${watched.has(r.snapshot.id) ? ", watchlist" : ""}`}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => choose(r.snapshot.id)}
@@ -234,7 +244,7 @@ export function PoolPicker({
                       </code>
                     </span>
                   </span>
-                  {r.snapshot.id === row.snapshot.id && (
+                  {r.snapshot.id === current && (
                     <span className="pool-picker-current">Current</span>
                   )}
                 </button>

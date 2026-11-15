@@ -1,5 +1,5 @@
 import { evaluateForecast } from "../src/analysis/forecast.js";
-import type { Mode } from "../src/shared/types.js";
+import type { Forecast, Mode } from "../src/shared/types.js";
 import type { Store } from "./store.js";
 
 export function performance(
@@ -7,7 +7,7 @@ export function performance(
   mode: Mode,
   now = Math.floor(Date.now() / 1000),
 ) {
-  const decisions = store.decisions(mode);
+  const decisions = store.decisions(mode, now);
   const wanted = new Set(
     decisions.flatMap((d) => Object.values(d.choices)).filter(Boolean),
   );
@@ -15,32 +15,27 @@ export function performance(
     mode,
     now,
     [...wanted].filter((id): id is string => id !== null),
+    false,
   );
-  const histories = new Map<string, ReturnType<Store["history"]>>();
-  const bounds = new Map<string, { from: number; to: number }>();
-  for (const f of selected.filter((f) => f.dueAt <= now)) {
-    const old = bounds.get(f.poolId);
-    bounds.set(f.poolId, {
-      from: Math.min(old?.from ?? Infinity, f.madeAt - 2700),
-      to: Math.max(old?.to ?? 0, Math.min(now, f.dueAt + 2700)),
-    });
+  const mature = new Map<string, Forecast[]>();
+  for (const f of selected) {
+    if (f.dueAt > now) continue;
+    const group = mature.get(f.poolId);
+    if (group) group.push(f);
+    else mature.set(f.poolId, [f]);
   }
-  const evaluations = selected.map((f) => {
-    if (f.dueAt > now) return evaluateForecast(f, [], now);
-    if (!histories.has(f.poolId))
-      histories.set(
-        f.poolId,
-        store
-          .history(
-            mode,
-            f.poolId,
-            bounds.get(f.poolId)!.from,
-            bounds.get(f.poolId)!.to,
-          )
-          .map((s) => ({ ...s, raw: {} })),
-      );
-    return evaluateForecast(f, histories.get(f.poolId)!, now);
-  });
+  // Release each pool's decoded history after evaluating its forecasts.
+  const completed = new Map<string, ReturnType<typeof evaluateForecast>>();
+  for (const [pool, forecasts] of mature) {
+    const from = Math.min(...forecasts.map((f) => f.madeAt)) - 2700;
+    const to = Math.min(now, Math.max(...forecasts.map((f) => f.dueAt)) + 2700);
+    const history = store.history(mode, pool, from, to, false);
+    for (const f of forecasts)
+      completed.set(f.id, evaluateForecast(f, history, now));
+  }
+  const evaluations = selected.map(
+    (f) => completed.get(f.id) ?? evaluateForecast(f, [], now),
+  );
   return {
     evaluations,
     decisions,

@@ -22,6 +22,8 @@
     "format:check": "prettier --check src server tests scripts config *.json *.ts *.js *.md index.html pnpm-workspace.yaml .github",
     "export:pages": "node --env-file-if-exists=.env --import tsx server/pages-export.ts",
     "storage:report": "node --import tsx server/storage-cli.ts report",
+    "storage:repack": "node --import tsx server/storage-cli.ts repack",
+    "storage:v3-copy": "node --import tsx server/storage-cli.ts v3-copy",
     "storage:migrate": "node --import tsx server/storage-cli.ts migrate",
     "storage:backup": "node --import tsx server/storage-cli.ts backup",
     "storage:restore": "node --import tsx server/storage-cli.ts restore",

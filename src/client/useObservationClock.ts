@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 export function useObservationClock() {
   const [now, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
-    const tick = () => setNow(Date.now() / 1000);
+    const tick = () => {
+      if (document.visibilityState === "visible") setNow(Date.now() / 1000);
+    };
     const timer = window.setInterval(tick, 15000);
     window.addEventListener("focus", tick);
     window.addEventListener("pageshow", tick);

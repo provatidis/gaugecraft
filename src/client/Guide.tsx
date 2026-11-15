@@ -79,9 +79,7 @@ export function GettingStarted({
       className="getting-started"
       aria-labelledby="getting-started-title"
     >
-      <summary id="getting-started-title">
-        New here? From pool rewards to your share
-      </summary>
+      <summary id="getting-started-title">When should I use Markets?</summary>
       <div className="getting-started-heading">
         <button className="text-link dismiss-guide" onClick={onDismiss}>
           Dismiss
@@ -89,8 +87,11 @@ export function GettingStarted({
       </div>
       <ol className="starter-steps">
         <li>
-          <b>Find promising pools</b>
-          <span>Compare earnings for your allocation in Markets.</span>
+          <b>Find a specific pool</b>
+          <span>
+            Search by token, address or network. Opportunities provides the
+            ranked shortlist.
+          </span>
         </li>
         <li>
           <b>Investigate sustainability</b>
@@ -115,16 +116,16 @@ const steps: {
   action: string;
 }[] = [
   {
-    title: "Check the evidence is current",
-    text: "Read Latest retrieval and expand Data health for each network. Times are UTC. Observations older than 75 minutes are stale. Refresh reloads published data; it does not run the hosted collector.",
-    page: "markets",
-    action: "Open Markets",
+    title: "Start with Opportunities",
+    text: "Choose your network and enter your total allocation power. Each row models that same power in a single pool. The shortlist ranks history-qualified pools by 48-hour stress earnings. When none qualify, full-window baselines appear separately. Check Latest retrieval and Data health for collection issues.",
+    page: "opportunities",
+    action: "Build a shortlist",
   },
   {
-    title: "Build a shortlist",
-    text: "Enter intended power in Markets, then compare modeled earnings within each evidence group. Try stress earnings or pool-wide rewards as alternative sorts. Filter by network and star candidates. Partial fee windows are visible but do not receive a comparable earnings estimate.",
+    title: "Look up a specific pool in Markets",
+    text: "Search tokens or paste a contract address, filter by evidence and star pools to revisit them. The directory includes pools with incomplete windows or prices. Open a pool to inspect the source of its estimate.",
     page: "markets",
-    action: "Find pools",
+    action: "Browse Markets",
   },
   {
     title: "Investigate the source of the APR",
@@ -139,10 +140,10 @@ const steps: {
     action: "Open Simulator",
   },
   {
-    title: "Use rankings when evidence is sufficient",
-    text: "Opportunities ranks qualified pools by stressed earnings for your selected power. Until enough history exists, it shows baseline comparisons. Insufficient history is a missing-evidence state, not a negative score.",
-    page: "opportunities",
-    action: "Open Opportunities",
+    title: "Compare one pool with a split",
+    text: "In Simulator, expand Compare a two-pool split and select a second pool on the same network. Adjust the percentage to see both single-pool alternatives and the combined earnings for the same total power. Both legs use the selected scenario and timing. Check any power you already have in each pool.",
+    page: "simulator",
+    action: "Compare allocations",
   },
   {
     title: "Review, then evaluate",
@@ -160,7 +161,6 @@ export function Guide({ navigate }: { navigate: Navigate }) {
         aria-labelledby="guide-principle-title"
       >
         <div>
-          <span className="eyebrow">START WITH THIS DISTINCTION</span>
           <h2 id="guide-principle-title">Pool rewards ≠ your earnings</h2>
           <p>
             <b>Pool rewards are shared by all allocators.</b> Your earnings
@@ -181,7 +181,6 @@ export function Guide({ navigate }: { navigate: Navigate }) {
             Follow the evidence from a shortlist to a scenario you can explain.
           </p>
         </div>
-        <span className="badge">A quick orientation</span>
       </div>
       <ol className="guide-steps">
         {steps.map((step) => (

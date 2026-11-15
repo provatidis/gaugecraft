@@ -1,18 +1,74 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createHash } from "node:crypto";
+import { gzip } from "node:zlib";
+import { promisify } from "node:util";
 import { createReadStream } from "node:fs";
 import { stat, statfs } from "node:fs/promises";
 import { resolve, extname, sep, dirname } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { Store } from "./store.js";
-import { markets } from "./markets.js";
+import { markets, overviewRows, poolCoverage } from "./markets.js";
 import { performance } from "./performance.js";
 import { csvLines } from "./csv.js";
 import { configuredChains } from "./collector.js";
 import { dataHealth } from "../src/analysis/freshness.js";
 import { chartPoint } from "./pages-export.js";
 import type { BackupStatus } from "./backup-scheduler.js";
-import type { Mode } from "../src/shared/types.js";
+import type { MarketRow, Mode } from "../src/shared/types.js";
+
+const compress = promisify(gzip);
+const poolId = /^\d+:0x[\da-f]{40}$/;
+type StateBody = { json: string; etag: string; gzip?: Promise<Buffer> };
+function acceptsGzip(header = "") {
+  const encodings = header
+    .toLowerCase()
+    .split(",")
+    .map((entry) => entry.trim().split(/\s*;\s*/));
+  const match =
+    encodings.find(([name]) => name === "gzip") ??
+    encodings.find(([name]) => name === "*");
+  return (
+    !!match &&
+    !match.slice(1).some((parameter) => /^q\s*=\s*0(?:\.0*)?$/.test(parameter))
+  );
+}
+
+function representation(value: unknown): StateBody {
+  const json = JSON.stringify(value);
+  return {
+    json,
+    etag: `W/"${createHash("sha256").update(json).digest("base64url")}"`,
+  };
+}
+
+async function sendRepresentation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  body: StateBody,
+) {
+  res.appendHeader("Vary", "Accept-Encoding");
+  res.setHeader("Cache-Control", "private, no-cache");
+  res.setHeader("ETag", body.etag);
+  res.setHeader("Access-Control-Expose-Headers", "ETag");
+  if (
+    req.headers["if-none-match"]
+      ?.split(",")
+      .some((tag) => [body.etag, body.etag.slice(2), "*"].includes(tag.trim()))
+  ) {
+    res.writeHead(304);
+    res.end();
+    return;
+  }
+  const compressed = acceptsGzip(req.headers["accept-encoding"]);
+  if (compressed) res.setHeader("Content-Encoding", "gzip");
+  res.setHeader("Content-Type", "application/json");
+  if (req.method === "HEAD") res.end();
+  else if (compressed) {
+    body.gzip ??= compress(body.json, { level: 4 });
+    res.end(await body.gzip);
+  } else res.end(body.json);
+}
 
 export function handler(
   store: Store,
@@ -27,16 +83,85 @@ export function handler(
   },
 ) {
   const clock = options.now ?? (() => Math.floor(Date.now() / 1000));
-  const cache = new Map<string, { until: number; value: any }>();
+  // Both ledgers are append-only. The rightmost rowid lookup is constant cost
+  // and observes commits from both the in-process and external collectors.
+  const revisionQuery = store.db.prepare(
+    "SELECT (SELECT MAX(rowid) FROM snapshots) AS snapshot, (SELECT MAX(rowid) FROM forecasts) AS forecast",
+  );
+  const revision = () => {
+    const row = revisionQuery.get()!;
+    return `${row.snapshot}:${row.forecast}`;
+  };
+  const cache = new Map<
+    string,
+    { until: number; revision: string; value: any }
+  >();
   const cached = <T>(key: string, seconds: number, build: () => T): T => {
     const old = cache.get(key);
-    if (old && old.until > clock()) return old.value;
+    const rev = revision();
+    if (old && old.until > clock() && old.revision === rev) return old.value;
     const value = build();
-    cache.set(key, { until: clock() + seconds, value });
+    if (!old && cache.size >= 24) cache.delete(cache.keys().next().value!);
+    cache.set(key, { until: clock() + seconds, revision: rev, value });
     return value;
   };
-  const rows = (mode: Mode) =>
-    cached(`markets:${mode}`, 30, () => markets(store, mode));
+  // With fixed inputs, evaluation results can next change at a forecast's
+  // maturity, a saved decision's maturity, or a stored future observation.
+  const nextEvaluation = store.db.prepare(`
+    SELECT MIN(at) AS at FROM (
+      SELECT MIN(due_at) AS at FROM forecasts WHERE mode=$mode AND due_at>$now
+      UNION ALL SELECT MIN(at)+172800 FROM decisions WHERE mode=$mode AND at>$now-172800
+      UNION ALL SELECT MIN(at) FROM snapshots WHERE mode=$mode AND at>$now
+    )`);
+  const decisionRevision = store.db.prepare(
+    "SELECT MAX(rowid) AS id FROM decisions",
+  );
+  const evaluations = new Map<
+    Mode,
+    { revision: string; from: number; until: number; body: StateBody }
+  >();
+  function performanceBody(mode: Mode) {
+    const rev = `${revision()}:${decisionRevision.get()!.id}`;
+    const now = clock();
+    const old = evaluations.get(mode);
+    if (old && old.revision === rev && now >= old.from && now < old.until)
+      return old.body;
+    const body = representation(performance(store, mode, now));
+    const until = Number(nextEvaluation.get({ mode, now })!.at ?? Infinity);
+    evaluations.set(mode, { revision: rev, from: now, until, body });
+    return body;
+  }
+  const views = new Map<
+    string,
+    { revision: string; rows: MarketRow[]; runKey?: string; body?: StateBody }
+  >();
+  function stateBody(mode: Mode, overview: boolean) {
+    const key = `${mode}:${overview}`;
+    const rev = revision();
+    let view = views.get(key);
+    if (!view || view.revision !== rev) {
+      view = { revision: rev, rows: markets(store, mode, !overview) };
+      views.set(key, view);
+    }
+    const runs = store.runs(mode);
+    const now = clock();
+    // Legacy clients use now as the request time. Overview clients use the
+    // view generation time and advance observation age on their own clock.
+    const runKey = JSON.stringify([overview ? null : now, runs]);
+    if (!view.body || view.runKey !== runKey) {
+      view.body = representation({
+        mode,
+        now,
+        markets: overview ? overviewRows(view.rows) : view.rows,
+        runs,
+        collectorEnabled: options.collectorEnabled,
+        collectionKind: "persistent-service",
+        configuredChains: configuredChains(),
+      });
+      view.runKey = runKey;
+    }
+    return view.body;
+  }
   return async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -55,9 +180,9 @@ export function handler(
         return;
       }
       const origin = req.headers.origin;
+      if (options.origins?.length) res.setHeader("Vary", "Origin");
       if (origin && options.origins?.includes(origin)) {
         res.setHeader("Access-Control-Allow-Origin", origin);
-        res.setHeader("Vary", "Origin");
       }
       if (req.method !== "GET" && req.method !== "HEAD") {
         send(405, { error: "Read-only service" });
@@ -72,7 +197,9 @@ export function handler(
       }
       if (url.pathname === "/health/data") {
         const health = dataHealth(
-          rows("live"),
+          cached("health:live", Infinity, () =>
+            store.latest("live", false).map((snapshot) => ({ snapshot })),
+          ),
           configuredChains(),
           store.runs("live"),
           "live",
@@ -107,6 +234,10 @@ export function handler(
         send(ok ? 200 : 503, {
           status: ok ? "healthy" : "attention",
           databaseBytes: size,
+          reusablePageBytes:
+            Number(
+              store.db.prepare("PRAGMA freelist_count").get()!.freelist_count,
+            ) * Number(store.db.prepare("PRAGMA page_size").get()!.page_size),
           freeBytes: free,
           backup: {
             enabled: backup?.enabled ?? false,
@@ -119,15 +250,30 @@ export function handler(
         return;
       }
       if (url.pathname === "/api/state") {
-        send(200, {
+        const body = stateBody(
           mode,
-          now: clock(),
-          markets: rows(mode),
-          runs: store.runs(mode),
-          collectorEnabled: options.collectorEnabled,
-          collectionKind: "persistent-service",
-          configuredChains: configuredChains(),
-        });
+          url.searchParams.get("view") === "overview",
+        );
+        await sendRepresentation(req, res, body);
+        return;
+      }
+      if (url.pathname === "/api/coverage") {
+        const id = url.searchParams.get("pool") ?? "";
+        const at = Number(url.searchParams.get("at"));
+        if (
+          !poolId.test(id) ||
+          !url.searchParams.has("at") ||
+          !Number.isSafeInteger(at) ||
+          at < 0
+        ) {
+          send(400, { error: "Invalid coverage observation" });
+          return;
+        }
+        const coverage = cached(`coverage:${mode}:${id}:${at}`, 1800, () =>
+          poolCoverage(store, mode, id, at),
+        );
+        if (coverage) send(200, coverage);
+        else send(404, { error: "Observation not found" });
         return;
       }
       if (url.pathname === "/api/history") {
@@ -136,48 +282,54 @@ export function handler(
             30,
             Math.max(1, Number(url.searchParams.get("days")) || 2),
           );
-        if (!/^\d+:0x[\da-f]{40}$/.test(id)) {
+        if (!poolId.test(id)) {
           send(400, { error: "Invalid pool ID" });
           return;
         }
         send(
           200,
-          cached(`history:${mode}:${id}:${days}`, 30, () =>
-            store
-              .history(mode, id, clock() - days * 86400, clock())
-              .map(chartPoint),
-          ),
+          cached(`history:${mode}:${id}:${days}`, 30, () => {
+            const end =
+              mode === "demo"
+                ? Number(
+                    store.db
+                      .prepare(
+                        "SELECT MAX(at) AS at FROM snapshots WHERE mode=? AND pool_id=?",
+                      )
+                      .get(mode, id)!.at ?? 0,
+                  )
+                : clock();
+            return store
+              .history(mode, id, end - days * 86400, end, false)
+              .map(chartPoint);
+          }),
         );
-        // Bound cache growth when public callers request many different pools/windows.
-        if (cache.size > 256) cache.clear();
         return;
       }
       if (url.pathname === "/api/performance") {
-        send(
-          200,
-          cached(`performance:${mode}`, 60, () =>
-            performance(store, mode, clock()),
-          ),
-        );
+        await sendRepresentation(req, res, performanceBody(mode));
         return;
       }
       if (url.pathname === "/api/export.csv") {
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="gaugecraft-${mode}-30d.csv"`,
+        );
+        res.setHeader("Cache-Control", "no-store");
+        if (req.method === "HEAD") {
+          res.end();
+          return;
+        }
         // A separate read connection gives the streamed export a consistent SQLite view.
-        const reader = new Store(options.database);
+        const reader = new Store(options.database, { readOnly: true });
         try {
-          res.writeHead(200, {
-            "Content-Type": "text/csv; charset=utf-8",
-            "Content-Disposition": `attachment; filename="gaugecraft-${mode}-30d.csv"`,
-            "Cache-Control": "no-store",
-          });
-          await pipeline(
-            Readable.from(
-              csvLines(
-                reader.observations(mode, clock() - 30 * 86400, clock(), false),
-              ),
-            ),
-            res,
-          );
+          const end = clock();
+          const observations =
+            mode === "demo"
+              ? reader.fixtureExport(30)
+              : reader.observations(mode, end - 30 * 86400, end, false);
+          await pipeline(Readable.from(csvLines(observations)), res);
         } finally {
           reader.close();
         }

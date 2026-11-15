@@ -44,7 +44,11 @@ export function readRoute(
   const evidence = params.get("evidence") ?? "all";
   const scenario = params.get("scenario");
   return {
-    page: pages.includes(path as Page) ? (path as Page) : "markets",
+    page: !path
+      ? "opportunities"
+      : pages.includes(path as Page)
+        ? (path as Page)
+        : "markets",
     mode:
       (params.has("mode") ? params.get("mode") : fallbackMode) === "demo"
         ? "demo"
@@ -74,6 +78,8 @@ export function routeHash(route: ResearchRoute) {
     params.set("pool", route.pool);
   if (route.page === "simulator" && route.scenario !== "forecast")
     params.set("scenario", route.scenario);
+  if (route.page === "opportunities" && route.market.chain !== "all")
+    params.set("network", route.market.chain);
   if (route.page === "markets") {
     const f = route.market;
     if (f.search) params.set("q", f.search);

@@ -4,7 +4,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import {
   access,
   mkdir,
-  rename,
+  link,
   rm,
   stat,
   writeFile,
@@ -12,10 +12,11 @@ import {
 } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { createGzip, createGunzip } from "node:zlib";
+import { createGzip, createGunzip, gzipSync } from "node:zlib";
 import { Store } from "./store.js";
-import { digest } from "./storage-codec.js";
-import { migrateSchema, version } from "./storage-schema.js";
+import { digest, isGzip, RecordCodec, recordTables } from "./storage-codec.js";
+import { repackRecords } from "./storage-repack.js";
+import { migrateSchema, version, STORAGE_VERSION } from "./storage-schema.js";
 
 export function verifyDatabase(path: string) {
   const db = new DatabaseSync(path, { readOnly: true });
@@ -46,6 +47,12 @@ async function requireNew(path: string) {
     `Destination already exists: ${path}. Refusing to overwrite a database or backup.`,
   );
 }
+// Only called after closing every handle to a private, uniquely named work file.
+async function removePrivateDatabase(path: string) {
+  for (const suffix of ["", "-wal", "-shm"])
+    await rm(path + suffix, { force: true });
+}
+
 export async function consistentCopy(source: string, destination: string) {
   if (resolve(source) === resolve(destination))
     throw new Error("Source and destination must differ");
@@ -64,7 +71,9 @@ export async function consistentCopy(source: string, destination: string) {
 export function fingerprint(path: string) {
   const db = new DatabaseSync(path, { readOnly: true });
   const v = version(db);
-  const store = v === 3 ? new Store(path) : null;
+  const store = [3, STORAGE_VERSION].includes(v)
+    ? new Store(path, { readOnly: true })
+    : null;
   try {
     const result: Record<string, { count: number; sha256: string }> = {};
     for (const mode of ["live", "demo"] as const) {
@@ -110,7 +119,45 @@ export function fingerprint(path: string) {
   }
 }
 
-export async function migrateDatabase(source: string, destination: string) {
+// Convert only the private destination copy. A rollback can include observations
+// and forecasts written since deployment, even if the previous build only reads v3.
+function restoreV3Format(db: DatabaseSync) {
+  if (version(db) === 3) return;
+  if (version(db) !== STORAGE_VERSION)
+    throw new Error("Expected a v3 or v4 source");
+  const codec = new RecordCodec(db);
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const table of recordTables) {
+      const select = db.prepare(
+        `SELECT rowid,body FROM ${table} WHERE rowid>? ORDER BY rowid LIMIT 128`,
+      );
+      const write = db.prepare(`UPDATE ${table} SET body=? WHERE rowid=?`);
+      let last = 0;
+      for (;;) {
+        const rows = select.all(last);
+        if (!rows.length) break;
+        for (const row of rows) {
+          const packed = row.body as Uint8Array;
+          if (!isGzip(packed))
+            write.run(gzipSync(codec.expand(table, packed)), row.rowid);
+        }
+        last = Number(rows.at(-1)!.rowid);
+      }
+    }
+    db.exec(
+      "DROP TABLE storage_repack; DROP TABLE storage_dictionaries; PRAGMA user_version=3; COMMIT;",
+    );
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+export async function migrateDatabase(
+  source: string,
+  destination: string,
+  targetVersion: 3 | 4 = STORAGE_VERSION,
+) {
   await requireNew(destination);
   const temp = `${destination}.${randomUUID()}.migrating`;
   try {
@@ -120,7 +167,11 @@ export async function migrateDatabase(source: string, destination: string) {
     const db = new DatabaseSync(temp);
     try {
       db.exec("PRAGMA foreign_keys=ON");
-      migrateSchema(db);
+      if (targetVersion === 3) restoreV3Format(db);
+      else {
+        migrateSchema(db);
+        await repackRecords(db, Number.MAX_SAFE_INTEGER, false);
+      }
       db.exec("VACUUM");
     } finally {
       db.close();
@@ -131,7 +182,7 @@ export async function migrateDatabase(source: string, destination: string) {
       throw new Error(
         "Migration changed historical records; destination was not installed",
       );
-    await rename(temp, destination);
+    await link(temp, destination);
     const afterBytes = (await stat(destination)).size;
     return {
       beforeBytes,
@@ -140,7 +191,7 @@ export async function migrateDatabase(source: string, destination: string) {
       records: after,
     };
   } finally {
-    await rm(temp, { force: true });
+    await removePrivateDatabase(temp);
   }
 }
 
@@ -172,16 +223,22 @@ export async function createBackup(
       compressedBytes: (await stat(temp)).size,
       databaseBytes: (await stat(`${temp}.sqlite`)).size,
     };
-    await rename(temp, destination);
-    await writeFile(
-      `${destination}.json`,
-      JSON.stringify(manifest, null, 2) + "\n",
-      { flag: "wx", mode: 0o600 },
-    );
+    await writeFile(`${temp}.json`, JSON.stringify(manifest, null, 2) + "\n", {
+      flag: "wx",
+      mode: 0o600,
+    });
+    await link(temp, destination);
+    try {
+      await link(`${temp}.json`, `${destination}.json`);
+    } catch (error) {
+      await rm(destination);
+      throw error;
+    }
     return manifest;
   } finally {
     await rm(temp, { force: true });
-    await rm(`${temp}.sqlite`, { force: true });
+    await rm(`${temp}.json`, { force: true });
+    await removePrivateDatabase(`${temp}.sqlite`);
   }
 }
 export async function restoreBackup(source: string, destination: string) {
@@ -212,9 +269,9 @@ export async function restoreBackup(source: string, destination: string) {
     if ((await stat(temp)).size !== manifest.databaseBytes)
       throw new Error("Restored size mismatch");
     verifyDatabase(temp);
-    await rename(temp, destination);
+    await link(temp, destination);
   } finally {
-    await rm(temp, { force: true });
+    await removePrivateDatabase(temp);
   }
 }
 
@@ -241,6 +298,9 @@ export async function storageReport(path: string, pools = 474) {
     return {
       version: version(db),
       databaseBytes: bytes,
+      reusablePageBytes:
+        Number(db.prepare("PRAGMA freelist_count").get()!.freelist_count) *
+        Number(db.prepare("PRAGMA page_size").get()!.page_size),
       snapshots,
       forecasts,
       bytesPerObservationIncludingIndexesAndForecasts: bytesPerObservation,

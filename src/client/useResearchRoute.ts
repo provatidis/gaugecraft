@@ -23,7 +23,13 @@ export function useResearchRoute(defaultMode: Mode) {
     };
     const changed = () => {
       const parsed = readRoute(location.hash, current.current.mode);
-      if (parsed.page !== "markets") parsed.market = current.current.market;
+      if (parsed.page === "opportunities")
+        parsed.market = {
+          ...current.current.market,
+          chain: parsed.market.chain,
+        };
+      else if (parsed.page !== "markets")
+        parsed.market = current.current.market;
       if (!parsed.pool && !["analysis", "simulator"].includes(parsed.page))
         parsed.pool = current.current.pool;
       current.current = parsed;

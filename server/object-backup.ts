@@ -110,7 +110,7 @@ export async function archiveEvidence(
   from: number,
   to: number,
 ) {
-  const store = new Store(source);
+  const store = new Store(source, { readOnly: true });
   let count = 0;
   function* records() {
     for (const s of store.observations("live", from, to)) {

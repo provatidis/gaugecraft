@@ -1,18 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { money, number, earningsMoney, pct, date } from "./format.js";
 import type {
   Evaluation,
   HistoryPoint,
   MarketRow,
-  Maybe,
   Mode,
   Run,
   Snapshot,
@@ -34,10 +25,13 @@ import {
   allocationEarnings,
   compareEarnings,
   EVIDENCE_LABELS,
+  type EarningsComparison,
 } from "../analysis/earnings.js";
+import { shortlist } from "./shortlist.js";
 import { AllocationSize } from "./AllocationSize.js";
+import { SplitComparison } from "./SplitComparison.js";
 import { PoolPicker } from "./PoolPicker.js";
-import { Coverage } from "./Coverage.js";
+import { PoolCoverage } from "./Coverage.js";
 import { ThemeSelect } from "./ThemeSelect.js";
 import { InstallApp } from "./InstallApp.js";
 import { matchesPool } from "./pool-search.js";
@@ -51,34 +45,26 @@ import {
   type ScenarioBasis,
 } from "./research-route.js";
 import { ContextHelp, GettingStarted, Guide } from "./Guide.js";
-const money = (n: Maybe | undefined, compact = false) =>
-  n == null
-    ? "—"
-    : new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-        maximumFractionDigits: n < 10 ? 2 : 0,
-        ...(compact ? { notation: "compact" as const } : {}),
-      }).format(n);
-const earningsMoney = (n: Maybe | undefined) =>
-  n == null
-    ? "—"
-    : new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(n);
-const number = (n: Maybe | undefined, compact = false) =>
-  n == null
-    ? "—"
-    : new Intl.NumberFormat("en-US", {
-        maximumFractionDigits: compact ? 1 : 0,
-        ...(compact ? { notation: "compact" as const } : {}),
-      }).format(n);
-const pct = (n: Maybe | undefined) => (n == null ? "—" : `${n.toFixed(2)}%`);
-const date = (t: number) =>
-  new Date(t * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC";
+const HistoryChart = React.lazy(() => import("./HistoryChart.js"));
+// A tab can outlive the deployment that supplied its chart chunk.
+class ChartBoundary extends React.Component<React.PropsWithChildren> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? (
+      <div className="notice warning" role="status">
+        The chart display could not be loaded.{" "}
+        <button className="text-link" onClick={() => window.location.reload()}>
+          Reload charts
+        </button>
+      </div>
+    ) : (
+      this.props.children
+    );
+  }
+}
 const short = (s: string) => s.slice(0, 6) + "…" + s.slice(-4);
 function useLocal<T>(key: string, fallback: T): [T, (value: T) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -164,8 +150,8 @@ const metricInfo: Record<string, string> = {
     "Percentage change in reward allocation supply versus the last observation at least 6 hours earlier. Includes stake decay, not just new competitors.",
 };
 const nav = [
-  ["markets", "◫", "Markets"],
   ["opportunities", "↗", "Opportunities"],
+  ["markets", "◫", "Markets"],
   ["analysis", "⌁", "Pool analysis"],
   ["simulator", "⊞", "Simulator"],
   ["performance", "▥", "Performance"],
@@ -229,7 +215,8 @@ export default function App() {
     }
   }, [mode]);
   const setSelected = (pool: string) => updateRoute({ pool });
-  const setMode = (mode: Mode) => updateRoute({ mode, pool: "" });
+  const setMode = (mode: Mode) =>
+    updateRoute({ mode, pool: "", market: { ...emptyFilters } });
   const [watch, setWatch] = useLocal<string[]>("gc-watchlist", []);
   const [power, setPower] = useLocal<string>(
     "gc-allocation-power",
@@ -266,6 +253,7 @@ export default function App() {
     const abort = new AbortController();
     let alive = true;
     setLoading(true);
+    setError("");
     setState((previous) => (previous?.mode === mode ? previous : null));
     let inFlight = false;
     const load = () => {
@@ -291,7 +279,9 @@ export default function App() {
         });
     };
     void load();
-    const timer = setInterval(load, 60000);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 60000);
     const resume = () => {
       if (document.visibilityState === "visible") void load();
     };
@@ -318,12 +308,30 @@ export default function App() {
     );
     return () => cancelAnimationFrame(frame);
   }, [scrollRevision, readyToRestore, scrollTarget]);
-  const current =
-    rows.find((r) => r.snapshot.id === selected) ??
-    [...rows].sort(
-      (a, b) =>
-        (b.snapshot.rewards48hUsd ?? -1) - (a.snapshot.rewards48hUsd ?? -1),
-    )[0];
+  const estimates = useMemo(
+    () =>
+      new Map(
+        rows.map((r) => [
+          r.snapshot.id,
+          comparison(r, allocationSettings, now),
+        ]),
+      ),
+    [rows, power, existing, now],
+  );
+  const screen = useMemo(
+    () => shortlist(rows, estimates, route.market.chain),
+    [rows, estimates, route.market.chain],
+  );
+  const current = selected
+    ? rows.find((r) => r.snapshot.id === selected)
+    : (screen.visible[0] ??
+      rows.find(
+        (r) =>
+          r.snapshot.active &&
+          (route.market.chain === "all" ||
+            r.snapshot.chain === route.market.chain),
+      ) ??
+      rows[0]);
   useEffect(() => {
     if (!selected && current && ["analysis", "simulator"].includes(page))
       updateRoute({ pool: current.snapshot.id }, true);
@@ -349,17 +357,17 @@ export default function App() {
     (!stale &&
       health.issues === 0 &&
       health.currentNetworks === health.networks.length);
-  const revision = `${state?.now ?? 0}:${refresh}`;
+  const performanceRevision = `${Math.floor(now / 60)}:${refresh}`;
   return (
     <div className={`shell page-${page}`}>
       <aside className="sidebar">
         <a
           className="brand"
-          aria-label="Gaugecraft markets"
-          href="#"
+          aria-label="Gaugecraft opportunities"
+          href="#opportunities"
           onClick={(e) => {
             e.preventDefault();
-            navigate("markets");
+            navigate("opportunities");
           }}
         >
           <span className="brand-mark" aria-hidden="true">
@@ -389,26 +397,13 @@ export default function App() {
                 {
                   {
                     markets: "Markets",
-                    opportunities: "Ideas",
+                    opportunities: "Shortlist",
                     analysis: "Analyze",
                     simulator: "Simulate",
                     performance: "Results",
                   }[id]
                 }
               </span>
-              {id === "opportunities" && (
-                <small>
-                  {
-                    rows.filter(
-                      (r) =>
-                        r.snapshot.active &&
-                        isFresh(r.snapshot, now) &&
-                        r.forecast.basis === "history" &&
-                        r.forecast.stressedPer1000 !== null,
-                    ).length
-                  }
-                </small>
-              )}
             </button>
           ))}
         </nav>
@@ -511,8 +506,13 @@ export default function App() {
             !rows.some((r) => r.snapshot.id === selected) &&
             ["analysis", "simulator"].includes(page) && (
               <div className="notice warning">
-                The linked pool is not in this dataset. Showing an available
-                pool; use the picker or change the data source.
+                The linked pool is unavailable in this dataset.{" "}
+                <button
+                  className="text-link"
+                  onClick={() => updateRoute({ page: "markets", pool: "" })}
+                >
+                  Find a pool in Markets →
+                </button>
               </div>
             )}
           {stale && (
@@ -547,13 +547,13 @@ export default function App() {
                 {page === "guide"
                   ? "A short path from headline APR to an informed allocation scenario."
                   : page === "markets"
-                    ? "Compare pool revenue, incentives and allocation pressure over the next 48 hours."
+                    ? "Browse the pool directory by token, network or address. Star pools to revisit them."
                     : page === "opportunities"
-                      ? "Transparent signals, explicit stress tests, and no invented confidence scores."
+                      ? "Compare 48-hour earnings for your stake."
                       : page === "analysis"
                         ? "A record of what was observable, with each estimate kept in context."
                         : page === "simulator"
-                          ? "Test allocation dilution and incentive runway before you decide."
+                          ? "Test your power in one pool or compare a split across two pools on the same network."
                           : "Frozen forecasts, observed outcomes, and simple benchmarks."}
               </p>
             </div>
@@ -579,13 +579,11 @@ export default function App() {
                 ? "Fixture dataset"
                 : last
                   ? "Onchain observations"
-                  : "Waiting for observations"}
+                  : loading
+                    ? "Loading observations…"
+                    : "No retrieval available"}
             </b>
-            <span>
-              {last
-                ? `Latest retrieval ${date(last)}`
-                : "The collector will preserve genuine observations as they arrive."}
-            </span>
+            <span>{last ? `Latest retrieval ${date(last)}` : ""}</span>
             {mode === "live" && state && (
               <span
                 className={`health-pill ${healthy ? "" : "attention"}`}
@@ -616,8 +614,51 @@ export default function App() {
               }}
             />
           )}
-          {page !== "guide" && page !== "markets" && (
-            <ContextHelp page={page} onGuide={showGuide} />
+          {page !== "guide" &&
+            page !== "markets" &&
+            page !== "opportunities" && (
+              <ContextHelp page={page} onGuide={showGuide} />
+            )}
+          {page === "opportunities" && (
+            <AllocationSize
+              value={power}
+              onChange={setPower}
+              showAssumptions={false}
+            >
+              <label>
+                <span>Network</span>
+                <select
+                  value={route.market.chain}
+                  onChange={(event) =>
+                    updateRoute(
+                      {
+                        pool: "",
+                        market: {
+                          ...route.market,
+                          chain: event.target.value,
+                          page: 0,
+                        },
+                      },
+                      true,
+                    )
+                  }
+                >
+                  <option value="all">All networks</option>
+                  {[
+                    ...new Set([
+                      ...rows.map((r) => r.snapshot.chain),
+                      ...(route.market.chain !== "all"
+                        ? [route.market.chain]
+                        : []),
+                    ]),
+                  ]
+                    .sort()
+                    .map((chain) => (
+                      <option key={chain}>{chain}</option>
+                    ))}
+                </select>
+              </label>
+            </AllocationSize>
           )}
           {page === "guide" ? (
             <Guide navigate={navigate} />
@@ -626,6 +667,13 @@ export default function App() {
               <div className="spinner" />
               Reading observations…
             </div>
+          ) : error && !state ? (
+            <button
+              className="button secondary"
+              onClick={() => setRefresh((v) => v + 1)}
+            >
+              Retry loading observations
+            </button>
           ) : rows.length === 0 ? (
             <div className="empty panel">
               <span className="empty-symbol">◫</span>
@@ -658,6 +706,7 @@ export default function App() {
                   setWatch={setWatch}
                   allocationSettings={allocationSettings}
                   now={now}
+                  estimates={estimates}
                   filters={route.market}
                   onFiltersChange={(market) => {
                     marketScroll.current = { top: 0, left: 0 };
@@ -668,10 +717,16 @@ export default function App() {
               )}
               {page === "opportunities" && (
                 <Opportunities
-                  rows={rows}
+                  screen={screen}
+                  estimates={estimates}
+                  power={power}
                   open={open}
-                  allocationSettings={allocationSettings}
-                  now={now}
+                  browse={() =>
+                    updateRoute({
+                      page: "markets",
+                      market: { ...emptyFilters, chain: route.market.chain },
+                    })
+                  }
                 />
               )}
               {page === "analysis" && current && (
@@ -681,7 +736,7 @@ export default function App() {
                   select={setSelected}
                   watch={watch}
                   mode={mode}
-                  revision={revision}
+                  revision={refresh}
                   simulate={() => open(current, "simulator")}
                 />
               )}
@@ -698,7 +753,11 @@ export default function App() {
                 />
               )}
               {page === "performance" && (
-                <Performance mode={mode} rows={rows} revision={revision} />
+                <Performance
+                  mode={mode}
+                  rows={rows}
+                  revision={performanceRevision}
+                />
               )}
             </>
           )}
@@ -787,6 +846,7 @@ function Markets({
   setWatch,
   allocationSettings,
   now,
+  estimates,
   filters,
   onFiltersChange,
   scrollMemory,
@@ -797,6 +857,7 @@ function Markets({
   setWatch: (s: string[]) => void;
   allocationSettings: AllocationSettings;
   now: number;
+  estimates: Map<string, EarningsComparison>;
   filters: MarketFilters;
   onFiltersChange: (filters: MarketFilters) => void;
   scrollMemory: React.RefObject<{ top: number; left: number }>;
@@ -819,16 +880,6 @@ function Markets({
   });
   const sort = sorting.key,
     desc = sorting.descending;
-  const estimates = useMemo(
-    () =>
-      new Map(
-        rows.map((r) => [
-          r.snapshot.id,
-          comparison(r, allocationSettings, now),
-        ]),
-      ),
-    [rows, allocationSettings.power, allocationSettings.existing, now],
-  );
   const personalSort = sort === "earnings" || sort === "stress";
   const comparableCount = [...estimates.values()].filter(
     (e) => e.earnings !== null,
@@ -838,10 +889,7 @@ function Markets({
     knownRewards = active.filter((r) => r.snapshot.rewards48hUsd !== null),
     knownTvl = active.filter((r) => r.snapshot.tvlUsd !== null),
     ready = active.filter(
-      (r) =>
-        isFresh(r.snapshot, now) &&
-        r.forecast.basis === "history" &&
-        r.forecast.stressedPer1000 !== null,
+      (r) => estimates.get(r.snapshot.id)?.basis === "history",
     );
   const partialWindows = active.filter(
     (r) => r.snapshot.windowEnd - r.snapshot.windowStart < 47 * 3600,
@@ -931,7 +979,7 @@ function Markets({
       <details className="market-overview">
         <summary>
           Market overview · {active.length} active pools · {ready.length} with
-          persistence evidence
+          history-based earnings
         </summary>
         <div className="stat-grid">
           <Stat
@@ -963,12 +1011,12 @@ function Markets({
             detail={`Spot estimate · ${knownTvl.length}/${active.length} pools priced`}
           />
           <Stat
-            label="Persistence evidence"
+            label="History-based earnings"
             value={`${ready.length} pools`}
             detail={
               ready.length
-                ? "Meet the minimum history gate"
-                : "Insufficient history · collecting"
+                ? "Comparable at the selected power"
+                : "No qualifying estimates at this size"
             }
             highlight={ready.length > 0}
           />
@@ -1496,7 +1544,7 @@ function Markets({
               : "Use the simulator to compare earnings after your own allocation."}
           </p>
         </div>
-        <button onClick={() => open(filtered[0] ?? rows[0])}>
+        <button disabled={!filtered[0]} onClick={() => open(filtered[0])}>
           Inspect a pool →
         </button>
       </div>
@@ -1523,143 +1571,168 @@ function Stat({
   );
 }
 function Opportunities({
-  rows,
+  screen,
+  estimates,
+  power,
   open,
-  allocationSettings,
-  now,
+  browse,
 }: {
-  rows: MarketRow[];
-  open: (r: MarketRow, p?: Page) => void;
-  allocationSettings: AllocationSettings;
-  now: number;
+  screen: ReturnType<typeof shortlist>;
+  estimates: Map<string, EarningsComparison>;
+  power: string;
+  open: (row: MarketRow, page?: Page, scenario?: ScenarioBasis) => void;
+  browse: () => void;
 }) {
-  const estimates = new Map(
-    rows.map((r) => [r.snapshot.id, comparison(r, allocationSettings, now)]),
-  );
-  const ranked = rows
-    .filter((r) => estimates.get(r.snapshot.id)!.basis === "history")
-    .sort((a, b) =>
-      compareEarnings(
-        estimates.get(a.snapshot.id)!,
-        estimates.get(b.snapshot.id)!,
-        "stress",
-      ),
-    );
-  const baseline = rows
-    .filter((r) => estimates.get(r.snapshot.id)!.basis === "baseline")
-    .sort((a, b) =>
-      compareEarnings(
-        estimates.get(a.snapshot.id)!,
-        estimates.get(b.snapshot.id)!,
-        "earnings",
-      ),
-    )
-    .slice(0, 10);
-  const list = ranked.length ? ranked.slice(0, 20) : baseline;
+  const ranked = screen.qualified > 0;
+  const count = ranked ? screen.qualified : screen.baselines;
+  const invalidPower =
+    power.trim() !== "" &&
+    !(Number(power) > 0 && Number.isFinite(Number(power)));
   return (
-    <>
-      <AllocationSize
-        value={allocationSettings.power}
-        onChange={allocationSettings.setPower}
-      />
-      <div className="notice warning">
-        <b>
-          {ranked.length
-            ? "Ranking uses a declared stress case."
-            : "Insufficient history for persistence ranking."}
-        </b>{" "}
-        {ranked.length
-          ? "Candidates are ordered by earnings for the selected power after a 50% fee decline and 50% more competing allocation. This is a stress assumption, not a confidence interval."
-          : "The comparison below holds current allocation and eligible fees constant. It is a baseline scenario, not evidence that these APRs will persist."}
-      </div>
-      <div className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>
-              {ranked.length
-                ? "Persistence candidates"
-                : "Baseline comparisons"}
-            </h2>
-            <p>
-              {allocationSettings.power.trim() === ""
-                ? "Reference: 1,000 additional power."
-                : `Intended total: ${number(Number(allocationSettings.power))} power per pool.`}{" "}
-              Own dilution included.
-            </p>
-          </div>
-          <Badge tone={ranked.length ? "good" : "warn"}>
-            {ranked.length ? "History gate passed" : "Unranked for persistence"}
-          </Badge>
+    <section className="panel shortlist">
+      <div className="panel-header">
+        <div>
+          <h2>
+            {ranked
+              ? "Ranked shortlist"
+              : count
+                ? "Full-window baselines"
+                : "Pool shortlist"}
+          </h2>
+          <p>
+            {ranked
+              ? `${count} of ${screen.tracked} tracked pools qualify. Showing the top ${screen.visible.length} by stress earnings.`
+              : count
+                ? `Showing ${screen.visible.length} of ${count} baselines by estimated earnings. No pool in this selection qualifies for a history-based ranking.`
+                : `${screen.tracked} tracked pools in this network selection.`}
+          </p>
         </div>
-        <div className="candidate-list">
-          {list.map((r, i) => (
-            <div className="candidate" key={r.snapshot.id}>
-              {ranked.length > 0 && (
-                <span className="rank">{String(i + 1).padStart(2, "0")}</span>
-              )}
-              <Pair s={r.snapshot} />
-              <div>
-                <span className="small-label">
-                  {ranked.length ? "Estimate / 48h" : "Baseline / 48h"}
-                </span>
-                <strong>
-                  {earningsMoney(estimates.get(r.snapshot.id)!.earnings)}
-                </strong>
-              </div>
-              <div>
-                <span className="small-label">Stress / 48h</span>
-                <strong>
-                  {earningsMoney(estimates.get(r.snapshot.id)!.stress)}
-                </strong>
-              </div>
-              <div className="candidate-note">
-                {
-                  r.forecast.signals.find((s) => s.name === "Incentive runway")
-                    ?.value
-                }
-                <small>
+        <button className="text-link" onClick={browse}>
+          Browse Markets →
+        </button>
+      </div>
+      <details className="shortlist-method">
+        <summary>How are these pools chosen?</summary>
+        <p>
+          Markets includes pools from the configured Aero registries that have a
+          gauge and a rewards manager. Inactive pools remain visible in the
+          directory.
+        </p>
+        <p>
+          For this shortlist, each pool needs an active gauge, a current
+          observation, a 47–49 hour fee window and enough priced inputs to
+          estimate your share. A history-based ranking also requires at least
+          47½ hours of history, 80 priced fee observations and no gap over 75
+          minutes.
+        </p>
+        <p>
+          Each row puts your total power into that pool immediately and holds it
+          constant for 48 hours. Earnings use your share of projected revenue
+          after dilution. Simulator also lets you test timing, decay and a
+          two-pool split.
+        </p>
+        <p>
+          History-qualified pools are ordered by modeled earnings after forecast
+          fees fall 50% and projected competing power rises 50%. Scheduled
+          incentives keep their modeled value through expiry. When only
+          baselines are available, the list orders them by estimated earnings
+          under current conditions.
+        </p>
+      </details>
+      {screen.visible.length > 0 && (
+        <div className="shortlist-hint">
+          {ranked
+            ? "Stress models 50% lower fees and 50% more competing power."
+            : "Baselines hold current fees and competing power steady. Their persistence is untested."}{" "}
+          Open an amount to simulate it.
+        </div>
+      )}
+      <ol
+        className="shortlist-rows"
+        aria-label={
+          ranked
+            ? "Pools ranked by stress earnings"
+            : "Baseline pool comparisons"
+        }
+      >
+        {screen.visible.map((row, index) => {
+          const s = row.snapshot;
+          const e = estimates.get(s.id)!;
+          const metrics = ranked
+            ? (["stress", "earnings"] as const)
+            : (["earnings", "stress"] as const);
+          return (
+            <li key={s.id}>
+              <span className="shortlist-position" aria-hidden="true">
+                {index + 1}
+              </span>
+              <button
+                className="pool-button"
+                onClick={() => open(row)}
+                title="Open pool analysis"
+              >
+                <Pair s={s} />
+              </button>
+              {metrics.map((metric) => (
+                <button
+                  key={metric}
+                  className="shortlist-metric"
+                  onClick={() =>
+                    open(
+                      row,
+                      "simulator",
+                      metric === "stress" ? "stress" : "forecast",
+                    )
+                  }
+                  aria-label={`Simulate ${metric === "stress" ? "stress" : "estimated"} earnings for ${s.token0.symbol}/${s.token1.symbol} on ${s.chain} ${short(s.address)}`}
+                >
+                  <span>
+                    {metric === "stress" ? "Stress / 48h" : "Estimate / 48h"}
+                  </span>
+                  <strong>{earningsMoney(e[metric])}</strong>
+                </button>
+              ))}
+              <div className="shortlist-signals">
+                <span>
+                  Incentives ·{" "}
                   {
-                    r.forecast.signals.find(
-                      (s) => s.name === "Allocation pressure",
+                    row.forecast.signals.find(
+                      (signal) => signal.name === "Incentive runway",
                     )?.value
                   }
+                </span>
+                <small>
+                  Allocation{" "}
+                  {row.forecast.signals.find(
+                    (signal) => signal.name === "Allocation pressure",
+                  )?.value ?? "—"}
                 </small>
               </div>
-              <button className="button secondary" onClick={() => open(r)}>
+              <button
+                className="button secondary inspect-pool"
+                onClick={() => open(row)}
+              >
                 Analyze →
               </button>
-            </div>
-          ))}
-          {!list.length && (
-            <div className="empty compact">
-              No comparable candidates yet. Full fee windows, current
-              observations and complete prices are needed. Explore partial
-              observations in Markets.
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="method-grid">
-        <div className="panel text-panel">
-          <h3>How the forecast changes the baseline</h3>
+            </li>
+          );
+        })}
+      </ol>
+      {!count && (
+        <div className="empty compact">
+          <h3>
+            {invalidPower
+              ? "Enter a positive allocation power"
+              : "No comparable pools for this selection"}
+          </h3>
           <p>
-            Once the history gate passes, fees use the lower of the current
-            estimate and the latest six-hour median. Positive allocation growth
-            over six hours is extended linearly to 48 hours, capped at a
-            doubling. Outflows earn no forecast credit.
+            {invalidPower
+              ? "Clear the amount to try 1,000 reference power."
+              : "Open Markets to see individual fee windows, freshness and missing estimates, or choose another network."}
           </p>
         </div>
-        <div className="panel text-panel">
-          <h3>How uncertainty affects the ranking</h3>
-          <p>
-            There is no composite score or arbitrary weight. Exact incentive
-            expiry affects revenue directly. Fee variability, APR volatility,
-            volume spikes and uncalibrated allocator behavior remain visible
-            signals. Missing inputs block a total.
-          </p>
-        </div>
-      </div>
-    </>
+      )}
+    </section>
   );
 }
 function Analysis({
@@ -1676,27 +1749,55 @@ function Analysis({
   select: (s: string) => void;
   watch: string[];
   mode: Mode;
-  revision: string;
+  revision: number;
   simulate: () => void;
 }) {
-  const [days, setDays] = useState(2),
-    [history, setHistory] = useState<HistoryPoint[]>([]),
-    [error, setError] = useState("");
+  const [days, setDays] = useState(2);
   const s = row.snapshot;
+  const chartKey = `${mode}:${s.id}:${days}`;
+  const [series, setSeries] = useState<{
+    key: string;
+    points: HistoryPoint[];
+  } | null>(null);
+  const [historyError, setHistoryError] = useState<{
+    key: string;
+    message: string;
+  } | null>(null);
+  const error = historyError?.key === chartKey ? historyError.message : "";
+  const historyLoaded = series?.key === chartKey;
+  const windowEnd =
+    mode === "demo" ? s.observedAt : Math.floor(Date.now() / 1000);
+  const since = windowEnd - days * 86400;
+  const history = historyLoaded
+    ? series.points.filter(
+        (p) => p.observedAt >= since && p.observedAt <= windowEnd,
+      )
+    : [];
   useEffect(() => {
     const abort = new AbortController();
-    setHistory([]);
-    setError("");
+    setHistoryError(null);
     get<HistoryPoint[]>(
       `/api/history?mode=${mode}&pool=${s.id}&days=${days}`,
       abort.signal,
     )
-      .then(setHistory)
+      .then((points) => {
+        if (!abort.signal.aborted) setSeries({ key: chartKey, points });
+      })
       .catch((e) => {
-        if (e.name !== "AbortError") setError(e.message);
+        if (!abort.signal.aborted)
+          setHistoryError({ key: chartKey, message: e.message });
       });
     return () => abort.abort();
-  }, [s.id, mode, days, revision]);
+  }, [
+    chartKey,
+    s.id,
+    s.observedAt,
+    s.retrievedAt,
+    s.blockHash,
+    mode,
+    days,
+    revision,
+  ]);
   const charts: [keyof HistoryPoint, string, string][] = [
     ["stakeApr", "Stake APR", "% · estimate"],
     ["rewards48hUsd", "Pool rewards · next 48h", "USD · estimate"],
@@ -1785,15 +1886,19 @@ function Analysis({
           detail="Per stake and network"
         />
       </div>
-      <Coverage coverage={row.coverage} />
+      <PoolCoverage row={row} />
       <div className="section-line">
         <div>
           <h2>Observation history</h2>
           <p>
-            {history.length} snapshots ·{" "}
             {history.length
-              ? `${date(history[0].observedAt)} onward`
-              : "Loading observation history"}
+              ? `${history.length} snapshots · ${date(history[0].observedAt)} onward`
+              : error
+                ? "History could not be loaded"
+                : historyLoaded
+                  ? "No observations in the selected period"
+                  : "Loading observation history…"}
+            {mode === "demo" && ` · Fixture window ends ${date(s.observedAt)}`}
           </p>
         </div>
         <div className="segmented" role="group" aria-label="History range">
@@ -1814,110 +1919,58 @@ function Analysis({
         </div>
       </div>
       {error && <div className="notice danger">{error}</div>}
-      <div className="chart-grid">
-        {charts.map(([key, label, unit]) => (
-          <div className="panel chart-card" key={key}>
-            <div className="chart-heading">
-              <h3>
-                <Info name={key} label={label} />
-              </h3>
-              <span>{unit}</span>
-            </div>
-            {history.some((s) => s[key] !== null) ? (
-              <>
-                <div className="chart">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={history}
-                      margin={{ top: 12, right: 12, left: 0, bottom: 0 }}
+      <ChartBoundary>
+        <div className="chart-grid">
+          {charts.map(([key, label, unit]) => (
+            <div className="panel chart-card" key={key}>
+              <div className="chart-heading">
+                <h3>
+                  <Info name={key} label={label} />
+                </h3>
+                <span>{unit}</span>
+              </div>
+              {history.some((s) => s[key] !== null) ? (
+                <>
+                  <div className="chart">
+                    <React.Suspense
+                      fallback={
+                        <span className="chart-empty">Loading chart…</span>
+                      }
                     >
-                      <CartesianGrid
-                        vertical={false}
-                        stroke="var(--line)"
-                        strokeDasharray="3 4"
+                      <HistoryChart
+                        history={history}
+                        metric={key}
+                        label={label}
+                        days={days}
                       />
-                      <XAxis
-                        dataKey="observedAt"
-                        type="number"
-                        domain={["dataMin", "dataMax"]}
-                        tickFormatter={(t) =>
-                          new Date(Number(t) * 1000)
-                            .toISOString()
-                            .slice(days > 2 ? 5 : 11, days > 2 ? 10 : 16)
-                        }
-                        tick={{ fontSize: 11, fill: "var(--muted)" }}
-                        axisLine={{ stroke: "var(--line)" }}
-                        tickLine={{ stroke: "var(--line)" }}
-                        minTickGap={60}
-                      />
-                      <YAxis
-                        width={58}
-                        tickFormatter={(v) => number(Number(v), true)}
-                        tick={{ fontSize: 11, fill: "var(--muted)" }}
-                        axisLine={{ stroke: "var(--line)" }}
-                        tickLine={{ stroke: "var(--line)" }}
-                        domain={
-                          key === "stakeApr" || key === "allocation"
-                            ? ["auto", "auto"]
-                            : [0, "auto"]
-                        }
-                      />
-                      <Tooltip
-                        cursor={{ stroke: "var(--muted)" }}
-                        labelStyle={{ color: "var(--foreground)" }}
-                        itemStyle={{ color: "var(--foreground)" }}
-                        labelFormatter={(t) => date(Number(t))}
-                        formatter={(v) =>
-                          key === "stakeApr"
-                            ? pct(Number(v))
-                            : key === "allocation"
-                              ? number(Number(v))
-                              : money(Number(v))
-                        }
-                        contentStyle={{
-                          fontSize: 12,
-                          borderRadius: 8,
-                          border: "1px solid var(--control-border)",
-                          background: "var(--surface)",
-                          color: "var(--foreground)",
-                        }}
-                      />
-                      <Line
-                        type="linear"
-                        dataKey={key}
-                        name={label}
-                        stroke="var(--accent)"
-                        strokeWidth={2}
-                        dot={history.length < 6 ? { r: 3 } : false}
-                        activeDot={{ r: 4 }}
-                        connectNulls={false}
-                        isAnimationActive={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-                {history.length < 2 && (
-                  <div className="chart-caption">
-                    First observation saved. A trend needs more snapshots.
+                    </React.Suspense>
                   </div>
-                )}
-                {(key === "stakeApr" || key === "allocation") &&
-                  history.length >= 2 && (
+                  {history.length < 2 && (
                     <div className="chart-caption">
-                      Vertical axis follows the observed range to make changes
-                      visible.
+                      First observation saved. A trend needs more snapshots.
                     </div>
                   )}
-              </>
-            ) : (
-              <div className="chart-empty">
-                No supported observations in this window.
-                <small>Missing values are not plotted as zero.</small>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+                  {(key === "stakeApr" || key === "allocation") &&
+                    history.length >= 2 && (
+                      <div className="chart-caption">
+                        Vertical axis follows the observed range to make changes
+                        visible.
+                      </div>
+                    )}
+                </>
+              ) : (
+                <div className="chart-empty">
+                  {historyLoaded
+                    ? "No supported observations in this window."
+                    : error
+                      ? "History unavailable."
+                      : "Loading observations…"}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </ChartBoundary>
       <div className="section-line">
         <div>
           <h2>Persistence signals</h2>
@@ -2062,6 +2115,15 @@ function Simulator({
         <PoolPicker row={row} rows={rows} select={select} watch={watch} />
         <Badge>Inputs stay in this browser</Badge>
       </div>
+      <SplitComparison
+        row={row}
+        rows={rows}
+        watch={watch}
+        input={input}
+        basis={basis}
+        now={now}
+        allocationSettings={allocationSettings}
+      />
       <div className="simulator-layout">
         <section className="panel simulator-inputs">
           <h2>Your allocation</h2>

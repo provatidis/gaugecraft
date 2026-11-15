@@ -50,7 +50,8 @@ const server = createServer(
 let stop = async () => {};
 server.listen(port, process.env.HOST || "127.0.0.1", () => {
   console.log(`Gaugecraft listening on port ${port}`);
-  if (process.env.COLLECT !== "0") stop = scheduleCollector(store);
+  if (process.env.COLLECT !== "0")
+    stop = scheduleCollector(store, () => !backups.status.running);
 });
 let closing = false;
 for (const signal of ["SIGINT", "SIGTERM"] as const)

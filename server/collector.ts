@@ -1,3 +1,4 @@
+import { repackRecords } from "./storage-repack.js";
 import { Store } from "./store.js";
 import { AeroSource, chains, type Source } from "./sources/aero.js";
 export const configuredChains = () =>
@@ -74,7 +75,10 @@ export async function collect(
     store.release();
   }
 }
-export function scheduleCollector(store: Store) {
+export function scheduleCollector(store: Store, allowRepack?: () => boolean) {
+  const limit = Number(process.env.REPACK_ROWS_PER_COLLECTION ?? 1024);
+  const repack = Number.isSafeInteger(limit) && limit > 0 && allowRepack;
+  let repackComplete = false;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let active: Promise<void> = Promise.resolve();
@@ -82,7 +86,31 @@ export function scheduleCollector(store: Store) {
     if (stopped) return;
     active = (async () => {
       try {
-        await collect(store);
+        const outcome = await collect(store);
+        if (
+          repack &&
+          !repackComplete &&
+          outcome.runs.some((run) => !run.error) &&
+          !stopped &&
+          repack()
+        ) {
+          const deadline = Date.now() + 1800000 - (Date.now() % 1800000) - 1500;
+          try {
+            const result = await repackRecords(
+              store.db,
+              limit,
+              true,
+              () => stopped || !repack() || Date.now() >= deadline,
+            );
+            repackComplete = result.complete;
+            if (result.scanned)
+              console.log("Historical storage repack", result);
+          } catch {
+            console.error(
+              "Historical storage repack deferred; collection succeeded",
+            );
+          }
+        }
       } catch {
         console.error("Collector failed; previous observations preserved");
       }

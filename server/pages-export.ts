@@ -2,7 +2,7 @@ import { mkdir, writeFile, copyFile, open } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Store } from "./store.js";
-import { markets } from "./markets.js";
+import { markets, overviewRows } from "./markets.js";
 import { performance } from "./performance.js";
 import { configuredChains } from "./collector.js";
 import { toCsv } from "./csv.js";
@@ -52,17 +52,19 @@ export async function exportPages(
       const dir = join(destination, "data", mode);
       await mkdir(join(dir, "history"), { recursive: true });
       const rows = markets(store, mode);
+      const state = {
+        mode,
+        now,
+        markets: rows,
+        runs: store.runs(mode),
+        collectorEnabled: true,
+        collectionKind: "github-actions",
+        configuredChains: configuredChains(),
+      };
+      await writeFile(join(dir, "state.json"), JSON.stringify(state));
       await writeFile(
-        join(dir, "state.json"),
-        JSON.stringify({
-          mode,
-          now,
-          markets: rows,
-          runs: store.runs(mode),
-          collectorEnabled: true,
-          collectionKind: "github-actions",
-          configuredChains: configuredChains(),
-        }),
+        join(dir, "overview.json"),
+        JSON.stringify({ ...state, markets: overviewRows(rows) }),
       );
       await writeFile(
         join(dir, "performance.json"),
@@ -72,11 +74,13 @@ export async function exportPages(
       try {
         await csv.write(toCsv([]));
         for (const { snapshot } of rows) {
+          const end = mode === "demo" ? snapshot.observedAt : now;
           const history = store.history(
             mode,
             snapshot.id,
-            now - 30 * 86400,
-            now,
+            end - 30 * 86400,
+            end,
+            false,
           );
           await writeFile(
             join(dir, "history", `${snapshot.id.replace(":", "-")}.json`),
