@@ -145,6 +145,32 @@ export class Store {
       .prepare("SELECT * FROM runs WHERE mode=? ORDER BY id DESC LIMIT 30")
       .all(mode) as unknown as Run[];
   }
+  collectionDays(endExclusive: number) {
+    const startInclusive = endExclusive - 21 * 86400;
+    const networks = this.db
+      .prepare(
+        `
+      WITH attempts AS (
+        SELECT date(startedAt, 'unixepoch') AS day, chainId, status,
+          startedAt / 1800 AS slot, poolCount,
+          row_number() OVER (
+            PARTITION BY startedAt / 86400, chainId
+            ORDER BY (status = 'success') DESC, startedAt DESC, id DESC
+          ) AS poolCountRank
+        FROM runs
+        WHERE mode = 'live' AND startedAt >= ? AND startedAt < ?
+      )
+      SELECT day, chainId, count(*) AS attempts,
+        sum(status = 'success') AS successful, sum(status = 'partial') AS partial,
+        sum(status = 'error') AS failed, sum(status = 'running') AS running,
+        count(DISTINCT slot) AS attemptedHalfHours,
+        max(CASE WHEN poolCountRank = 1 AND status = 'success' THEN poolCount END) AS lastSuccessfulPoolCount
+      FROM attempts GROUP BY day, chainId ORDER BY day, chainId
+    `,
+      )
+      .all(startInclusive, endExclusive);
+    return { startInclusive, endExclusive, networks };
+  }
   ingest(snapshots: Snapshot[], saveForecasts = true) {
     const insert = this.db.prepare(
       "INSERT INTO snapshots(mode,pool_id,bucket,at,chain_id,block,body,input_hash,raw_hash) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -349,14 +375,17 @@ export class Store {
     ids: string[],
     includeRaw = true,
   ): Forecast[] {
+    // Read newest first and stop once the sample is full. The due-date index
+    // would sort all eligible forecast bodies before applying the limit.
+    // Spell out its previous tie order for cohorts sharing a source timestamp.
     const recent = this.db
       .prepare(
-        "SELECT body,input_hash FROM forecasts WHERE mode=? AND due_at>? ORDER BY made_at DESC LIMIT 250",
+        "SELECT body,input_hash FROM forecasts INDEXED BY forecast_dates WHERE mode=? AND due_at>? ORDER BY made_at DESC, due_at, rowid LIMIT 250",
       )
       .all(mode, now);
     const mature = this.db
       .prepare(
-        "SELECT body,input_hash FROM forecasts WHERE mode=? AND due_at<=? ORDER BY made_at DESC LIMIT 500",
+        "SELECT body,input_hash FROM forecasts INDEXED BY forecast_dates WHERE mode=? AND due_at<=? ORDER BY made_at DESC, due_at, rowid LIMIT 500",
       )
       .all(mode, now);
     const selected = ids.flatMap((id) => {

@@ -3368,7 +3368,7 @@ th .metric-help {
   color: var(--foreground);
   font-variant-numeric: tabular-nums;
 }
-.shortlist-metric:hover strong,
+.shortlist-metric:is(button):hover strong,
 .shortlist-metric:focus-visible strong {
   color: var(--accent);
   text-decoration: underline;
@@ -3443,15 +3443,29 @@ th .metric-help {
     gap: 4px 8px;
     padding: 14px;
   }
-  .shortlist .panel-header > div {
+  .shortlist .panel-header > div:first-child {
     display: contents;
   }
   .shortlist .panel-header p {
     grid-column: 1 / -1;
     margin: 0;
   }
-  .shortlist .panel-header .text-link {
-    grid-row: 1;
-    grid-column: 2;
+  .shortlist .panel-header .shortlist-actions {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+    margin-top: 4px;
   }
+}
+
+.shortlist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 14px;
+}
+.shortlist-actions .button {
+  white-space: normal;
+}
+.shortlist-metric:not(button) {
+  cursor: default;
 }

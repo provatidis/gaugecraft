@@ -70,3 +70,85 @@ test("empty samples have no implied date range or completed benchmarks", () => {
   assert.equal(s.lastDue, null);
   assert.equal(s.paired.length, 0);
 });
+
+test("each benchmark uses only windows where its own pick and the shortlist both have a finite outcome", () => {
+  const reports = [
+    evaluation("a", "proxy", 4),
+    evaluation("b", "proxy", 2),
+    evaluation("zero", "proxy", 0),
+    evaluation("gap", "insufficient", null),
+    evaluation("bad", "proxy", NaN),
+  ].map((e) => ({ ...e, poolId: e.forecastId }));
+  const decisions = [
+    {
+      at: 0,
+      choices: {
+        persistence: "a",
+        highestApr: "a",
+        highestRewards: "gap",
+        highestFees: "zero",
+      },
+    },
+    {
+      at: 1,
+      choices: {
+        persistence: "b",
+        highestApr: null,
+        highestRewards: "a",
+        highestFees: "bad",
+      },
+    },
+    {
+      at: 2,
+      choices: {
+        persistence: "gap",
+        highestApr: "bad",
+        highestRewards: "zero",
+        highestFees: "missing",
+      },
+    },
+  ];
+  const s = performanceSummary(reports, decisions);
+  assert.equal(s.paired.length, 0);
+  assert.deepEqual(
+    s.comparisons.map(
+      ({
+        key,
+        matched,
+        samePick,
+        shortlistMean,
+        benchmarkMean,
+        meanDifference,
+      }) => [
+        key,
+        matched,
+        samePick,
+        shortlistMean,
+        benchmarkMean,
+        meanDifference,
+      ],
+    ),
+    [
+      ["highestApr", 1, 1, 4, 4, 0],
+      ["highestRewards", 1, 0, 2, 4, -2],
+      ["highestFees", 1, 0, 4, 0, 4],
+    ],
+  );
+  assert.deepEqual(
+    s.comparisons[0].exclusions.map(([reason]) => reason).sort(),
+    [
+      "Benchmark · A complete earnings amount is unavailable.",
+      "Benchmark · No pool selection was saved.",
+      "Shortlist · fixture",
+    ],
+  );
+  const none = performanceSummary(reports, [decisions[2]]);
+  assert(
+    none.comparisons.every(
+      (c) =>
+        c.matched === 0 &&
+        c.shortlistMean === null &&
+        c.meanDifference === null,
+    ),
+  );
+});

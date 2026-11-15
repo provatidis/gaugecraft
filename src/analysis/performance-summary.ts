@@ -10,6 +10,69 @@ export interface DecisionGroup {
   at: number;
   choices: Record<string, string | null>;
 }
+function hasReturn(
+  e: Evaluation | undefined,
+): e is Evaluation & { observedReturnProxy: number } {
+  return (
+    e?.status === "proxy" &&
+    e.observedReturnProxy !== null &&
+    Number.isFinite(e.observedReturnProxy)
+  );
+}
+
+function missingReturn(
+  id: string | null | undefined,
+  e: Evaluation | undefined,
+) {
+  if (!id) return "No pool selection was saved.";
+  if (!e) return "The selected forecast is outside this evaluation sample.";
+  if (e.status === "proxy") return "A complete earnings amount is unavailable.";
+  return e.reason;
+}
+
+function compareRule(
+  key: string,
+  decisions: DecisionGroup[],
+  byId: Map<string, Evaluation>,
+) {
+  const exclusions = new Map<string, number>();
+  let matched = 0,
+    samePick = 0,
+    shortlistTotal = 0,
+    benchmarkTotal = 0;
+  for (const { choices } of decisions) {
+    const chosen = byId.get(choices.persistence ?? "");
+    const rival = byId.get(choices[key] ?? "");
+    if (hasReturn(chosen) && hasReturn(rival)) {
+      matched++;
+      if (chosen.poolId === rival.poolId) samePick++;
+      shortlistTotal += chosen.observedReturnProxy;
+      benchmarkTotal += rival.observedReturnProxy;
+      continue;
+    }
+    if (!hasReturn(chosen)) {
+      const why = `Shortlist · ${missingReturn(choices.persistence, chosen)}`;
+      exclusions.set(why, (exclusions.get(why) ?? 0) + 1);
+    }
+    if (!hasReturn(rival)) {
+      const why = `Benchmark · ${missingReturn(choices[key], rival)}`;
+      exclusions.set(why, (exclusions.get(why) ?? 0) + 1);
+    }
+  }
+  return {
+    key,
+    matched,
+    samePick,
+    shortlistMean: matched ? shortlistTotal / matched : null,
+    benchmarkMean: matched ? benchmarkTotal / matched : null,
+    meanDifference: matched
+      ? (shortlistTotal - benchmarkTotal) / matched
+      : null,
+    exclusions: [...exclusions].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    ),
+  };
+}
 export function performanceSummary(
   evaluations: Evaluation[],
   decisions: DecisionGroup[],
@@ -33,15 +96,7 @@ export function performanceSummary(
     const results = ids.map((id) => byId.get(id!));
     if (results.some((e) => e?.status === "pending")) cohorts.pending++;
     else if (results.some((e) => !e)) cohorts.missingEvaluation++;
-    else if (
-      results.some(
-        (e) =>
-          e?.status !== "proxy" ||
-          e.observedReturnProxy === null ||
-          !Number.isFinite(e.observedReturnProxy),
-      )
-    )
-      cohorts.incomplete++;
+    else if (results.some((e) => !hasReturn(e))) cohorts.incomplete++;
     else paired.push(d);
   }
   const due = evaluations.map((e) => e.dueAt);
@@ -50,6 +105,9 @@ export function performanceSummary(
     counts,
     cohorts,
     paired,
+    comparisons: Object.keys(BENCHMARK_NAMES)
+      .filter((key) => key !== "persistence")
+      .map((key) => compareRule(key, decisions, byId)),
     firstDue: due.length ? Math.min(...due) : null,
     lastDue: due.length ? Math.max(...due) : null,
   };

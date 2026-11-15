@@ -22,6 +22,7 @@ export interface ResearchRoute {
   page: Page;
   mode: Mode;
   pool: string;
+  compareWith: string;
   market: MarketFilters;
   scenario: ScenarioBasis;
 }
@@ -40,6 +41,8 @@ export function readRoute(
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
   const params = new URLSearchParams(query);
   const pool = (params.get("pool") ?? "").toLowerCase();
+  const validPool = (id: string) => /^\d+:0x[\da-f]{40}$/.test(id);
+  const compare = (params.get("compare") ?? "").toLowerCase();
   const pageNumber = Number(params.get("page") ?? 1);
   const evidence = params.get("evidence") ?? "all";
   const scenario = params.get("scenario");
@@ -53,7 +56,13 @@ export function readRoute(
       (params.has("mode") ? params.get("mode") : fallbackMode) === "demo"
         ? "demo"
         : "live",
-    pool: /^\d+:0x[\da-f]{40}$/.test(pool) ? pool : "",
+    pool: validPool(pool) ? pool : "",
+    compareWith:
+      (path === "opportunities" &&
+        (compare === "choose" || validPool(compare))) ||
+      (path === "simulator" && validPool(pool) && validPool(compare))
+        ? compare
+        : "",
     scenario:
       scenario === "stress" || scenario === "current" ? scenario : "forecast",
     market: {
@@ -80,6 +89,12 @@ export function routeHash(route: ResearchRoute) {
     params.set("scenario", route.scenario);
   if (route.page === "opportunities" && route.market.chain !== "all")
     params.set("network", route.market.chain);
+  if (
+    route.compareWith &&
+    (route.page === "opportunities" ||
+      (route.page === "simulator" && route.pool))
+  )
+    params.set("compare", route.compareWith);
   if (route.page === "markets") {
     const f = route.market;
     if (f.search) params.set("q", f.search);

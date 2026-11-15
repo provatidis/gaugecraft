@@ -40,7 +40,7 @@ const help: Record<ResearchPage, { title: string; paragraphs: string[] }> = {
     title: "What does forecast accuracy actually measure?",
     paragraphs: [
       "Forecasts are frozen when observations arrive and evaluated after 48 hours, only when coverage is sufficient. A mature forecast can remain unevaluable if collection gaps exist. Waiting longer does not recreate missing observations.",
-      "Results are observed-data return proxies for 1,000 additional power, not your actual position or claimed rewards. Compare strategies on matched, complete cohorts. Overlapping 48-hour windows are not independent trades or a compounded strategy return.",
+      "Results are observed-data return proxies for 1,000 additional power, not your actual position or claimed rewards. Read the matched-window count beside each benchmark. Each pair uses the same decision times and complete outcomes on both sides. The four-way view uses a common sample for all strategies. Overlapping 48-hour windows are not independent trades or a compounded strategy return.",
     ],
   },
 };
@@ -141,7 +141,7 @@ const steps: {
   },
   {
     title: "Compare one pool with a split",
-    text: "In Simulator, expand Compare a two-pool split and select a second pool on the same network. Adjust the percentage to see both single-pool alternatives and the combined earnings for the same total power. Both legs use the selected scenario and timing. Check any power you already have in each pool.",
+    text: "In Opportunities, choose Compare two pools. Select the first pool, then use Test split on a second pool with the same network and forecast window. Simulator opens with both pools selected. Adjust the split and compare its difference from the higher-earning single pool under estimate and stress. Check any power you already have in each pool.",
     page: "simulator",
     action: "Compare allocations",
   },

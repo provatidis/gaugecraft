@@ -324,8 +324,22 @@ test("hosted API remains read-only, distinguishes liveness from stale data, and 
     });
     assert.equal((await ended.json()).runs[0].status, "error");
     const perfUrl = `${root}/api/performance`;
-    const pending = await fetch(perfUrl);
-    assert.equal((await pending.json()).evaluations[0].status, "pending");
+    const [pending, concurrent] = await Promise.all([
+      fetch(perfUrl),
+      fetch(perfUrl),
+    ]);
+    const firstSample = await pending.json();
+    assert.equal(firstSample.evaluations[0].status, "pending");
+    assert.deepEqual(await concurrent.json(), firstSample);
+    assert.equal(concurrent.headers.get("etag"), pending.headers.get("etag"));
+    assert.equal(
+      (
+        await fetch(perfUrl, {
+          headers: { "If-None-Match": pending.headers.get("etag")! },
+        })
+      ).status,
+      304,
+    );
     clock = t + 48 * 3600;
     const mature = await fetch(perfUrl, {
       headers: { "If-None-Match": pending.headers.get("etag")! },

@@ -19,6 +19,7 @@ import {
   BENCHMARK_NAMES,
   performanceSummary,
 } from "../analysis/performance-summary.js";
+import { PairwiseBenchmarks } from "./PairwiseBenchmarks.js";
 import { get, assetUrl, exportUrl, hosted } from "./data.js";
 import { dataHealth, isFresh } from "../analysis/freshness.js";
 import {
@@ -27,6 +28,7 @@ import {
   EVIDENCE_LABELS,
   type EarningsComparison,
 } from "../analysis/earnings.js";
+import { splitCompatibilityError } from "../analysis/split.js";
 import { shortlist } from "./shortlist.js";
 import { AllocationSize } from "./AllocationSize.js";
 import { SplitComparison } from "./SplitComparison.js";
@@ -214,9 +216,14 @@ export default function App() {
       /* Browser storage is optional. */
     }
   }, [mode]);
-  const setSelected = (pool: string) => updateRoute({ pool });
+  const setSelected = (pool: string) => updateRoute({ pool, compareWith: "" });
   const setMode = (mode: Mode) =>
-    updateRoute({ mode, pool: "", market: { ...emptyFilters } });
+    updateRoute({
+      mode,
+      pool: "",
+      compareWith: "",
+      market: { ...emptyFilters },
+    });
   const [watch, setWatch] = useLocal<string[]>("gc-watchlist", []);
   const [power, setPower] = useLocal<string>(
     "gc-allocation-power",
@@ -242,6 +249,7 @@ export default function App() {
   function navigate(next: Page) {
     updateRoute({
       page: next,
+      compareWith: "",
       ...(["analysis", "simulator"].includes(next) && current
         ? { pool: current.snapshot.id }
         : {}),
@@ -349,7 +357,7 @@ export default function App() {
     p: Page = "analysis",
     scenario: ScenarioBasis = "forecast",
   ) {
-    updateRoute({ pool: row.snapshot.id, page: p, scenario });
+    updateRoute({ pool: row.snapshot.id, page: p, scenario, compareWith: "" });
   }
   const stale = mode === "live" && health.stalePools > 0;
   const healthy =
@@ -633,6 +641,7 @@ export default function App() {
                     updateRoute(
                       {
                         pool: "",
+                        compareWith: "",
                         market: {
                           ...route.market,
                           chain: event.target.value,
@@ -718,6 +727,17 @@ export default function App() {
               {page === "opportunities" && (
                 <Opportunities
                   screen={screen}
+                  rows={rows}
+                  compareWith={route.compareWith}
+                  selectForSplit={(compareWith) => updateRoute({ compareWith })}
+                  openSplit={(first, second) =>
+                    updateRoute({
+                      page: "simulator",
+                      pool: first.snapshot.id,
+                      compareWith: second.snapshot.id,
+                      scenario: "forecast",
+                    })
+                  }
                   estimates={estimates}
                   power={power}
                   open={open}
@@ -743,6 +763,10 @@ export default function App() {
               {page === "simulator" && current && (
                 <Simulator
                   row={current}
+                  compareWith={route.compareWith}
+                  selectSecond={(compareWith) =>
+                    updateRoute({ compareWith }, true)
+                  }
                   rows={rows}
                   select={setSelected}
                   watch={watch}
@@ -1571,18 +1595,48 @@ function Stat({
   );
 }
 function Opportunities({
-  screen,
+  screen: initialScreen,
+  rows,
+  compareWith,
+  selectForSplit,
+  openSplit,
   estimates,
   power,
   open,
   browse,
 }: {
   screen: ReturnType<typeof shortlist>;
+  rows: MarketRow[];
+  compareWith: string;
+  selectForSplit: (id: string) => void;
+  openSplit: (first: MarketRow, second: MarketRow) => void;
   estimates: Map<string, EarningsComparison>;
   power: string;
   open: (row: MarketRow, page?: Page, scenario?: ScenarioBasis) => void;
   browse: () => void;
 }) {
+  const choosing = compareWith !== "";
+  const choosingSecond = choosing && compareWith !== "choose";
+  const first = choosingSecond
+    ? rows.find((r) => r.snapshot.id === compareWith)
+    : undefined;
+  const firstEstimate = first && estimates.get(first.snapshot.id);
+  const firstUsable =
+    !!firstEstimate &&
+    firstEstimate.earnings !== null &&
+    firstEstimate.stress !== null;
+  const screen = useMemo(() => {
+    if (!choosingSecond) return initialScreen;
+    const compatible =
+      first && firstUsable
+        ? rows.filter((row) => !splitCompatibilityError(first, row))
+        : [];
+    return shortlist(compatible, estimates, "all");
+  }, [initialScreen, choosingSecond, first, firstUsable, rows, estimates]);
+  const choose = (row: MarketRow) => {
+    if (first && firstUsable) openSplit(first, row);
+    else selectForSplit(row.snapshot.id);
+  };
   const ranked = screen.qualified > 0;
   const count = ranked ? screen.qualified : screen.baselines;
   const invalidPower =
@@ -1593,58 +1647,117 @@ function Opportunities({
       <div className="panel-header">
         <div>
           <h2>
-            {ranked
-              ? "Ranked shortlist"
-              : count
-                ? "Full-window baselines"
-                : "Pool shortlist"}
+            {choosing
+              ? choosingSecond
+                ? "Choose the second pool"
+                : "Choose the first pool"
+              : ranked
+                ? "Ranked shortlist"
+                : count
+                  ? "Full-window baselines"
+                  : "Pool shortlist"}
           </h2>
           <p>
-            {ranked
-              ? `${count} of ${screen.tracked} tracked pools qualify. Showing the top ${screen.visible.length} by stress earnings.`
-              : count
-                ? `Showing ${screen.visible.length} of ${count} baselines by estimated earnings. No pool in this selection qualifies for a history-based ranking.`
-                : `${screen.tracked} tracked pools in this network selection.`}
+            {choosingSecond ? (
+              first ? (
+                <>
+                  Pair with{" "}
+                  <b>
+                    {first.snapshot.token0.symbol}/
+                    {first.snapshot.token1.symbol}
+                  </b>{" "}
+                  · {first.snapshot.chain} · {short(first.snapshot.address)}.
+                  Both pools must share a forecast window.
+                </>
+              ) : (
+                "The first pool is unavailable in this dataset."
+              )
+            ) : choosing ? (
+              "Choose one pool, then a second on the same network to test a split."
+            ) : ranked ? (
+              `${count} of ${screen.tracked} tracked pools qualify. Showing the top ${screen.visible.length} by stress earnings.`
+            ) : count ? (
+              `Showing ${screen.visible.length} of ${count} baselines by estimated earnings. No pool in this selection qualifies for a history-based ranking.`
+            ) : (
+              `${screen.tracked} tracked pools in this network selection.`
+            )}
           </p>
         </div>
-        <button className="text-link" onClick={browse}>
-          Browse Markets →
-        </button>
+        <div className="shortlist-actions">
+          {choosing ? (
+            <>
+              {choosingSecond && (
+                <button
+                  className="text-link"
+                  onClick={() => selectForSplit("choose")}
+                >
+                  Change first pool
+                </button>
+              )}
+              <button
+                className="button secondary"
+                onClick={() => selectForSplit("")}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              {count > 0 && (
+                <button
+                  className="button secondary"
+                  onClick={() => selectForSplit("choose")}
+                >
+                  Compare two pools
+                </button>
+              )}
+              <button className="text-link" onClick={browse}>
+                Browse Markets →
+              </button>
+            </>
+          )}
+        </div>
       </div>
-      <details className="shortlist-method">
-        <summary>How are these pools chosen?</summary>
-        <p>
-          Markets includes pools from the configured Aero registries that have a
-          gauge and a rewards manager. Inactive pools remain visible in the
-          directory.
-        </p>
-        <p>
-          For this shortlist, each pool needs an active gauge, a current
-          observation, a 47–49 hour fee window and enough priced inputs to
-          estimate your share. A history-based ranking also requires at least
-          47½ hours of history, 80 priced fee observations and no gap over 75
-          minutes.
-        </p>
-        <p>
-          Each row puts your total power into that pool immediately and holds it
-          constant for 48 hours. Earnings use your share of projected revenue
-          after dilution. Simulator also lets you test timing, decay and a
-          two-pool split.
-        </p>
-        <p>
-          History-qualified pools are ordered by modeled earnings after forecast
-          fees fall 50% and projected competing power rises 50%. Scheduled
-          incentives keep their modeled value through expiry. When only
-          baselines are available, the list orders them by estimated earnings
-          under current conditions.
-        </p>
-      </details>
+      {!choosing && (
+        <details className="shortlist-method">
+          <summary>How are these pools chosen?</summary>
+          <p>
+            Markets includes pools from the configured Aero registries that have
+            a gauge and a rewards manager. Inactive pools remain visible in the
+            directory.
+          </p>
+          <p>
+            For this shortlist, each pool needs an active gauge, a current
+            observation, a 47–49 hour fee window and enough priced inputs to
+            estimate your share. A history-based ranking also requires at least
+            47½ hours of history, 80 priced fee observations and no gap over 75
+            minutes.
+          </p>
+          <p>
+            Each row puts your total power into that pool immediately and holds
+            it constant for 48 hours. Earnings use your share of projected
+            revenue after dilution. Simulator also lets you test timing, decay
+            and a two-pool split.
+          </p>
+          <p>
+            History-qualified pools are ordered by modeled earnings after
+            forecast fees fall 50% and projected competing power rises 50%.
+            Scheduled incentives keep their modeled value through expiry. When
+            only baselines are available, the list orders them by estimated
+            earnings under current conditions.
+          </p>
+        </details>
+      )}
       {screen.visible.length > 0 && (
         <div className="shortlist-hint">
           {ranked
             ? "Stress models 50% lower fees and 50% more competing power."
             : "Baselines hold current fees and competing power steady. Their persistence is untested."}{" "}
-          Open an amount to simulate it.
+          {choosing
+            ? ranked
+              ? "History-based estimates."
+              : "Full-window baselines."
+            : "Open an amount to simulate it."}
         </div>
       )}
       <ol
@@ -1668,30 +1781,41 @@ function Opportunities({
               </span>
               <button
                 className="pool-button"
-                onClick={() => open(row)}
-                title="Open pool analysis"
+                onClick={() => (choosing ? choose(row) : open(row))}
+                title={
+                  choosing ? "Select pool for comparison" : "Open pool analysis"
+                }
               >
                 <Pair s={s} />
               </button>
-              {metrics.map((metric) => (
-                <button
-                  key={metric}
-                  className="shortlist-metric"
-                  onClick={() =>
-                    open(
-                      row,
-                      "simulator",
-                      metric === "stress" ? "stress" : "forecast",
-                    )
-                  }
-                  aria-label={`Simulate ${metric === "stress" ? "stress" : "estimated"} earnings for ${s.token0.symbol}/${s.token1.symbol} on ${s.chain} ${short(s.address)}`}
-                >
-                  <span>
-                    {metric === "stress" ? "Stress / 48h" : "Estimate / 48h"}
-                  </span>
-                  <strong>{earningsMoney(e[metric])}</strong>
-                </button>
-              ))}
+              {metrics.map((metric) =>
+                choosing ? (
+                  <div key={metric} className="shortlist-metric">
+                    <span>
+                      {metric === "stress" ? "Stress / 48h" : "Estimate / 48h"}
+                    </span>
+                    <strong>{earningsMoney(e[metric])}</strong>
+                  </div>
+                ) : (
+                  <button
+                    key={metric}
+                    className="shortlist-metric"
+                    onClick={() =>
+                      open(
+                        row,
+                        "simulator",
+                        metric === "stress" ? "stress" : "forecast",
+                      )
+                    }
+                    aria-label={`Simulate ${metric === "stress" ? "stress" : "estimated"} earnings for ${s.token0.symbol}/${s.token1.symbol} on ${s.chain} ${short(s.address)}`}
+                  >
+                    <span>
+                      {metric === "stress" ? "Stress / 48h" : "Estimate / 48h"}
+                    </span>
+                    <strong>{earningsMoney(e[metric])}</strong>
+                  </button>
+                ),
+              )}
               <div className="shortlist-signals">
                 <span>
                   Incentives ·{" "}
@@ -1710,9 +1834,13 @@ function Opportunities({
               </div>
               <button
                 className="button secondary inspect-pool"
-                onClick={() => open(row)}
+                onClick={() => (choosing ? choose(row) : open(row))}
               >
-                Analyze →
+                {choosing
+                  ? choosingSecond
+                    ? "Test split →"
+                    : "Select"
+                  : "Analyze →"}
               </button>
             </li>
           );
@@ -1721,14 +1849,20 @@ function Opportunities({
       {!count && (
         <div className="empty compact">
           <h3>
-            {invalidPower
-              ? "Enter a positive allocation power"
-              : "No comparable pools for this selection"}
+            {choosingSecond
+              ? "No compatible second pool"
+              : invalidPower
+                ? "Enter a positive allocation power"
+                : "No comparable pools for this selection"}
           </h3>
           <p>
-            {invalidPower
-              ? "Clear the amount to try 1,000 reference power."
-              : "Open Markets to see individual fee windows, freshness and missing estimates, or choose another network."}
+            {choosingSecond
+              ? first && !firstUsable
+                ? "The first pool no longer has comparable earnings for this power. Choose another first pool or adjust the allocation."
+                : "Choose a different first pool to compare the same forecast period on its network."
+              : invalidPower
+                ? "Clear the amount to try 1,000 reference power."
+                : "Open Markets to see individual fee windows, freshness and missing estimates, or choose another network."}
           </p>
         </div>
       )}
@@ -2063,6 +2197,8 @@ function Analysis({
 }
 function Simulator({
   row,
+  compareWith,
+  selectSecond,
   rows,
   select,
   watch,
@@ -2072,6 +2208,8 @@ function Simulator({
   setBasis,
 }: {
   row: MarketRow;
+  compareWith: string;
+  selectSecond: (id: string) => void;
   rows: MarketRow[];
   select: (s: string) => void;
   watch: string[];
@@ -2116,6 +2254,9 @@ function Simulator({
         <Badge>Inputs stay in this browser</Badge>
       </div>
       <SplitComparison
+        key={positionKey(row.snapshot)}
+        secondId={compareWith}
+        selectSecond={selectSecond}
         row={row}
         rows={rows}
         watch={watch}
@@ -2447,6 +2588,10 @@ function Performance({
   const currentPage = Math.min(page, pages - 1);
   return (
     <>
+      <PairwiseBenchmarks
+        comparisons={summary.comparisons}
+        total={data.decisions.length}
+      />
       <div className="stat-grid">
         <Stat
           label="Forecasts in this view"
@@ -2498,16 +2643,11 @@ function Performance({
         This is not a wallet’s realized return or an event-level backtest.
         Overlapping trailing windows are never summed.
       </div>
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>Strategy benchmarks</h2>
-            <p>
-              Selections were saved at collection time. Equal reference power;
-              no hindsight reselection.
-            </p>
-          </div>
-        </div>
+      <details className="panel benchmark-four">
+        <summary>
+          All four rules on the same windows · {paired.length} of{" "}
+          {data.decisions.length} matched
+        </summary>
         <div className="benchmark-coverage">
           <b>
             {paired.length} of {data.decisions.length} selection groups can be
@@ -2583,7 +2723,7 @@ function Performance({
             </tbody>
           </table>
         </div>
-      </section>
+      </details>
       <section className="panel performance-table">
         <div className="panel-header">
           <div>

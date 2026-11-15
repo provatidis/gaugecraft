@@ -225,8 +225,7 @@ export function evaluateForecast(
   };
   if (now < f.dueAt) return result;
   result.status = "insufficient";
-  result.reason =
-    "Awaiting a complete 48h observation window and an endpoint within 45 minutes of maturity.";
+  const incomplete = (reason: string) => ({ ...result, reason });
   const rows = history
     .filter(
       (s) =>
@@ -237,7 +236,10 @@ export function evaluateForecast(
     )
     .sort((a, b) => a.observedAt - b.observedAt);
   const end = rows.find((s) => s.observedAt >= f.dueAt);
-  if (!end) return result;
+  if (!end)
+    return incomplete(
+      "No endpoint observation within 45 minutes after maturity.",
+    );
   result.observedAllocation = end.allocation;
   if (end.allocation !== null && f.projectedAllocation !== null) {
     result.allocationError = Math.abs(f.projectedAllocation - end.allocation);
@@ -247,29 +249,36 @@ export function evaluateForecast(
         : (result.allocationError / end.allocation) * 100;
   }
   const anchor = rows.filter((s) => s.observedAt <= f.madeAt).at(-1);
-  if (!anchor) return result;
+  if (!anchor)
+    return incomplete(
+      "No starting observation within 45 minutes before the forecast.",
+    );
   const cover = rows.filter(
     (s) => s.observedAt >= anchor.observedAt && s.observedAt <= end.observedAt,
   );
+  if (cover.length < 80)
+    return incomplete("Fewer than 80 observations cover the holding period.");
   if (
-    cover.length < 80 ||
-    cover[0].observedAt > f.madeAt ||
     cover.some(
       (s, i) => i > 0 && s.observedAt - cover[i - 1].observedAt > 75 * 60,
     )
   )
-    return result;
+    return incomplete("The gap between observations exceeds 75 minutes.");
   if (
     Math.abs(end.windowStart - f.madeAt) > 45 * 60 ||
-    Math.abs(end.windowEnd - f.dueAt) > 45 * 60 ||
-    end.eligibleFees48hUsd === null ||
-    end.programs === null ||
-    cover.some((s) => s.allocation === null)
-  ) {
-    result.reason =
-      "Allocation endpoint is available; revenue window, prices or supply coverage are incomplete.";
-    return result;
-  }
+    Math.abs(end.windowEnd - f.dueAt) > 45 * 60
+  )
+    return incomplete(
+      "The recorded fee window starts or ends more than 45 minutes from the forecast window.",
+    );
+  if (end.eligibleFees48hUsd === null)
+    return incomplete("The endpoint has no priced eligible-fee total.");
+  if (end.programs === null)
+    return incomplete("The endpoint incentive schedule is unavailable.");
+  if (cover.some((s) => s.allocation === null))
+    return incomplete(
+      "An allocation supply observation is missing during the holding period.",
+    );
   // This is explicitly an observed-data proxy, NOT a realized wallet claim. Never sum overlapping rolling fees.
   const actualIncentives = incentives(end.programs, f.madeAt, f.dueAt);
   result.observedRevenueProxy = sumKnown([
@@ -290,7 +299,10 @@ export function evaluateForecast(
     const share =
       1000 / (((a.allocation as number) + (b.allocation as number)) / 2 + 1000);
     const inc = incentives(end.programs, left, right);
-    if (inc === null) return result;
+    if (inc === null)
+      return incomplete(
+        "An incentive amount could not be priced during the holding period.",
+      );
     earnings +=
       share * ((end.eligibleFees48hUsd * (right - left)) / HORIZON + inc);
   }

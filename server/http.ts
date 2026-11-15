@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
+import { Worker } from "node:worker_threads";
 import { gzip } from "node:zlib";
 import { promisify } from "node:util";
 import { createReadStream } from "node:fs";
@@ -35,11 +36,35 @@ function acceptsGzip(header = "") {
 }
 
 function representation(value: unknown): StateBody {
-  const json = JSON.stringify(value);
+  return jsonRepresentation(JSON.stringify(value));
+}
+
+function jsonRepresentation(json: string): StateBody {
   return {
     json,
     etag: `W/"${createHash("sha256").update(json).digest("base64url")}"`,
   };
+}
+
+function readPerformance(database: string, mode: Mode, now: number) {
+  return new Promise<StateBody>((resolve, reject) => {
+    const worker = new Worker(
+      new URL("./performance-worker.mjs", import.meta.url),
+      {
+        workerData: { database, mode, now },
+        execArgv: [],
+      },
+    );
+    worker.once("message", (json: string) => resolve(jsonRepresentation(json)));
+    worker.once("error", reject);
+    worker.once("exit", (code) =>
+      reject(
+        new Error(
+          `Performance worker exited before returning a result (${code})`,
+        ),
+      ),
+    );
+  });
 }
 
 async function sendRepresentation(
@@ -118,18 +143,37 @@ export function handler(
   );
   const evaluations = new Map<
     Mode,
-    { revision: string; from: number; until: number; body: StateBody }
+    { revision: string; from: number; until: number; body: Promise<StateBody> }
   >();
-  function performanceBody(mode: Mode) {
+  const inFlight = new Map<Mode, Promise<StateBody>>();
+  async function performanceBody(mode: Mode): Promise<StateBody> {
     const rev = `${revision()}:${decisionRevision.get()!.id}`;
     const now = clock();
     const old = evaluations.get(mode);
     if (old && old.revision === rev && now >= old.from && now < old.until)
       return old.body;
-    const body = representation(performance(store, mode, now));
+    // If a collection or maturity happened during an older read, finish it
+    // before opening another SQLite reader for this mode.
+    const previous = inFlight.get(mode);
+    if (previous) {
+      await previous.catch(() => {});
+      return performanceBody(mode);
+    }
     const until = Number(nextEvaluation.get({ mode, now })!.at ?? Infinity);
+    const body =
+      options.database === ":memory:"
+        ? Promise.resolve(representation(performance(store, mode, now)))
+        : readPerformance(options.database, mode, now);
     evaluations.set(mode, { revision: rev, from: now, until, body });
-    return body;
+    inFlight.set(mode, body);
+    try {
+      return await body;
+    } catch (error) {
+      evaluations.delete(mode);
+      throw error;
+    } finally {
+      inFlight.delete(mode);
+    }
   }
   const views = new Map<
     string,
@@ -217,6 +261,16 @@ export function handler(
           expectedNetworks: health.networks.length,
           collectionIssues: health.issues,
         });
+        return;
+      }
+      if (url.pathname === "/health/collection-days") {
+        const end = Math.floor(clock() / 86400) * 86400;
+        send(
+          200,
+          cached(`collection-days:${end}`, 300, () =>
+            store.collectionDays(end),
+          ),
+        );
         return;
       }
       if (url.pathname === "/health/storage") {
@@ -307,7 +361,7 @@ export function handler(
         return;
       }
       if (url.pathname === "/api/performance") {
-        await sendRepresentation(req, res, performanceBody(mode));
+        await sendRepresentation(req, res, await performanceBody(mode));
         return;
       }
       if (url.pathname === "/api/export.csv") {

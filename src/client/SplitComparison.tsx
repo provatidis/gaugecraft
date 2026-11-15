@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { MarketRow, Maybe } from "../shared/types.js";
 import type { SimulationInput } from "../analysis/math.js";
 import { SCENARIO_LABELS, type ScenarioBasis } from "../analysis/scenarios.js";
@@ -10,16 +10,18 @@ import "./split.css";
 const power = new Intl.NumberFormat("en-US", { maximumSignificantDigits: 6 });
 const name = ({ snapshot: s }: MarketRow) =>
   `${s.token0.symbol} / ${s.token1.symbol} · ${s.address.slice(-4)}`;
-function splitDifference(split: Maybe, first: Maybe, second: Maybe) {
-  if (split === null || first === null || second === null) return null;
-  const difference = split - Math.max(first, second);
-  return Math.abs(difference) < 0.01
-    ? "The split and the higher single-pool estimate are within one cent."
-    : `The split is ${earningsMoney(Math.abs(difference))} ${difference > 0 ? "above" : "below"} the higher single-pool estimate in this scenario.`;
+function differenceLabel(amount: Maybe) {
+  if (amount === null) return "—";
+  if (amount === 0) return "Same earnings";
+  if (Math.abs(amount) < 0.01)
+    return `${amount > 0 ? "Higher" : "Lower"} by < $0.01`;
+  return `${earningsMoney(Math.abs(amount))} ${amount > 0 ? "more" : "less"}`;
 }
 
 export function SplitComparison({
   row,
+  secondId,
+  selectSecond,
   rows,
   watch,
   input,
@@ -28,6 +30,8 @@ export function SplitComparison({
   allocationSettings,
 }: {
   row: MarketRow;
+  secondId: string;
+  selectSecond: (id: string) => void;
   rows: MarketRow[];
   watch: string[];
   input: SimulationInput;
@@ -39,8 +43,10 @@ export function SplitComparison({
     setExisting: (values: Record<string, string>) => void;
   };
 }) {
-  const [open, setOpen] = useState(false);
-  const [secondId, setSecondId] = useState("");
+  const [open, setOpen] = useState(Boolean(secondId));
+  useEffect(() => {
+    if (secondId) setOpen(true);
+  }, [secondId]);
   const [firstPercent, setFirstPercent] = useState(50);
   const candidates = open
     ? rows.filter(
@@ -54,17 +60,26 @@ export function SplitComparison({
   const reference = !allocationSettings.power.trim();
   const key = second ? `${second.snapshot.mode}:${second.snapshot.id}` : "";
   const existing = reference ? "0" : (allocationSettings.existing[key] ?? "0");
-  const result = second
-    ? simulateSplit(
-        row,
-        second,
-        firstPercent,
-        input,
-        Number(existing),
-        basis,
-        now,
-      )
-    : null;
+  const calculate = (scenario: ScenarioBasis) =>
+    second
+      ? simulateSplit(
+          row,
+          second,
+          firstPercent,
+          input,
+          Number(existing),
+          scenario,
+          now,
+        )
+      : null;
+  const estimate = calculate("forecast");
+  const stress = calculate("stress");
+  const result =
+    basis === "forecast"
+      ? estimate
+      : basis === "stress"
+        ? stress
+        : calculate("current");
   const mixed = second && second.forecast.basis !== row.forecast.basis;
   const basisText = (r: MarketRow) =>
     r.forecast.basis === "history"
@@ -74,6 +89,7 @@ export function SplitComparison({
   return (
     <details
       className="panel split-comparison"
+      open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>Compare a two-pool split</summary>
@@ -83,6 +99,11 @@ export function SplitComparison({
             Keep the same total power and compare putting it all in one pool
             with dividing it between two on {row.snapshot.chain}.
           </p>
+          {secondId && !second && (
+            <p role="status">
+              The linked second pool is unavailable for this pool and network.
+            </p>
+          )}
           {candidates.length === 0 ? (
             <p>No second pool on this network is available in this dataset.</p>
           ) : (
@@ -91,7 +112,7 @@ export function SplitComparison({
                 row={second}
                 rows={candidates}
                 watch={watch}
-                select={setSecondId}
+                select={selectSecond}
                 purpose="Choose a second pool"
               />
               {second && (
@@ -138,18 +159,54 @@ export function SplitComparison({
                     )}
                   </div>
                   <p>
-                    <strong>{SCENARIO_LABELS[basis]}</strong> · 48h ·{" "}
                     {reference
                       ? "1,000 additional reference power"
-                      : `${power.format(input.power)} total power`}
-                    . All three estimates use your activation delay and stake
-                    duration.
+                      : `${power.format(input.power)} total power`}{" "}
+                    · 48h · Your activation delay and stake duration apply to
+                    both pools.
                   </p>
                   {result &&
                     (result.error !== null ? (
                       <p role="status">{result.error}</p>
                     ) : (
                       <>
+                        <h3>Split versus the higher-earning single pool</h3>
+                        <dl
+                          className="split-deltas"
+                          aria-label="Split difference over 48 hours"
+                        >
+                          {(
+                            [
+                              ["Estimate", estimate],
+                              ["Stress", stress],
+                            ] as const
+                          ).map(([label, comparison]) => {
+                            const valid =
+                              comparison &&
+                              comparison.error === null &&
+                              comparison.advantage !== null;
+                            const single =
+                              valid &&
+                              comparison.firstOnly.earnings! >=
+                                comparison.secondOnly.earnings!
+                                ? row
+                                : second;
+                            return (
+                              <div key={label}>
+                                <dt>{label}</dt>
+                                <dd>
+                                  {valid
+                                    ? differenceLabel(comparison.advantage)
+                                    : "—"}
+                                </dd>
+                                {valid && (
+                                  <small>vs. all in {name(single)}</small>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </dl>
+                        <h3>{SCENARIO_LABELS[basis]} earnings</h3>
                         <dl
                           className="split-results"
                           aria-label="Modeled earnings over 48 hours"
@@ -189,11 +246,9 @@ export function SplitComparison({
                         </dl>
                         {result.total !== null && (
                           <p>
-                            {splitDifference(
-                              result.total,
-                              result.firstOnly.earnings,
-                              result.secondOnly.earnings,
-                            )}{" "}
+                            {basis === "current" &&
+                              result.advantage !== null &&
+                              `Split difference at current competition · ${differenceLabel(result.advantage)}. `}
                             {name(row)} contributes{" "}
                             {earningsMoney(result.firstLeg.earnings)} and{" "}
                             {name(second)} contributes{" "}

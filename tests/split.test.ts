@@ -142,3 +142,28 @@ test("unmatched windows, duplicate pools and incompatible networks or modes cann
     );
   }
 });
+
+test("each split difference uses the stronger single-pool alternative in that scenario", () => {
+  const first = pool(0),
+    second = pool(1);
+  first.forecast.projectedFees = 200;
+  first.forecast.projectedIncentives = 0;
+  second.forecast.projectedFees = 0;
+  second.forecast.projectedIncentives = 170;
+  const fixed = { ...budget, existingPower: 0 };
+  const estimate = simulateSplit(first, second, 50, fixed, 0, "forecast", time);
+  const stress = simulateSplit(first, second, 50, fixed, 0, "stress", time);
+  assert.equal(estimate.error, null);
+  assert.equal(stress.error, null);
+  assert.ok(estimate.firstOnly.earnings! > estimate.secondOnly.earnings!);
+  assert.ok(stress.secondOnly.earnings! > stress.firstOnly.earnings!);
+  assert.equal(
+    estimate.advantage,
+    estimate.total! - estimate.firstOnly.earnings!,
+  );
+  assert.equal(stress.advantage, stress.total! - stress.secondOnly.earnings!);
+  second.snapshot.windowStart = time - HOUR;
+  const missing = simulateSplit(first, second, 50, fixed, 0, "stress", time);
+  assert.equal(missing.error, null);
+  assert.equal(missing.advantage, null);
+});

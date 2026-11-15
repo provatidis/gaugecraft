@@ -89,3 +89,37 @@ test("a forecast with zero observed revenue has no percentage error denominator"
   assert.equal(e.revenuePctError, null);
   assert.equal(e.revenueError, 100);
 });
+
+test("incomplete outcomes identify the missing observation without producing a return", () => {
+  const f = forecast(sample(t), rows);
+  const future = Array.from({ length: 97 }, (_, i) => sample(t + i * 1800));
+  const end = future.at(-1)!;
+  const cases = [
+    [future.slice(0, -1), /endpoint observation/],
+    [future.slice(1), /starting observation/],
+    [[future[0], end], /80 observations/],
+    [future.filter((_, i) => i < 10 || i > 13), /75 minutes/],
+    [
+      [...future.slice(0, -1), { ...end, windowStart: end.observedAt - 7200 }],
+      /fee window/,
+    ],
+    [
+      [...future.slice(0, -1), { ...end, eligibleFees48hUsd: null }],
+      /eligible-fee/,
+    ],
+    [
+      [...future.slice(0, -1), { ...end, programs: null }],
+      /incentive schedule/,
+    ],
+    [
+      [...future.slice(0, -1), { ...end, allocation: null }],
+      /allocation supply/,
+    ],
+  ] as const;
+  for (const [history, reason] of cases) {
+    const e = evaluateForecast(f, [...history], t + HORIZON);
+    assert.equal(e.status, "insufficient");
+    assert.equal(e.observedReturnProxy, null);
+    assert.match(e.reason, reason);
+  }
+});

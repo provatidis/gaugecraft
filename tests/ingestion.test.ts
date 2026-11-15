@@ -145,3 +145,83 @@ test("prices require depth and do not infer unknown stablecoins from a ticker", 
     undefined,
   );
 });
+
+test("daily collection history separates retries, failures and missing pool counts at UTC boundaries", () => {
+  const db = new Store(":memory:");
+  const end = 18000 * 86400;
+  const day = end - 86400;
+  try {
+    const add = (
+      chain: number,
+      at: number,
+      count: number,
+      status: "success" | "error" | "partial",
+      mode: "live" | "demo" = "live",
+    ) => {
+      const id = db.startRun(chain, mode, at);
+      db.finishRun(id, status, count, null, at + 1);
+    };
+    add(1, end - 21 * 86400 - 1, 100, "success");
+    add(1, end - 21 * 86400, 25, "success");
+    add(1, day, 29, "success");
+    add(1, day + 1, 30, "success");
+    add(1, day + 2, 0, "error");
+    add(1, day + 1800, 19, "partial");
+    add(1, day + 1801, 99, "success", "demo");
+    add(1, end, 99, "success");
+    db.startRun(2, "live", day + 20);
+    const report = db.collectionDays(end);
+    assert.equal(report.networks.length, 3);
+    assert.equal(report.networks[0].lastSuccessfulPoolCount, 25);
+    assert.deepEqual(
+      { ...report.networks[1] },
+      {
+        day: new Date(day * 1000).toISOString().slice(0, 10),
+        chainId: 1,
+        attempts: 4,
+        successful: 2,
+        partial: 1,
+        failed: 1,
+        running: 0,
+        attemptedHalfHours: 2,
+        lastSuccessfulPoolCount: 30,
+      },
+    );
+    assert.equal(report.networks[2].lastSuccessfulPoolCount, null);
+    assert.equal(report.networks[2].running, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test("bounded performance samples retain the original picks when many pools share the cutoff timestamp", () => {
+  const db = new Store(":memory:");
+  try {
+    const cohort = (at: number, count: number) =>
+      Array.from({ length: count }, (_, i) => {
+        const snapshot = demoSnapshot(at);
+        const address = `0x${(count - i).toString(16).padStart(40, "0")}`;
+        return { ...snapshot, id: poolId(snapshot.chainId, address), address };
+      });
+    const mature = cohort(t, 501);
+    const pending = cohort(t + 86400, 251);
+    db.ingest([...mature, ...pending]);
+    const saved = db.db
+      .prepare("SELECT id FROM forecasts WHERE pool_id=? AND made_at=?")
+      .get(mature[500].id, t)!.id as string;
+    const selected = db.evaluationForecasts(
+      "demo",
+      t + 48 * 3600,
+      [saved],
+      false,
+    );
+    assert.deepEqual(
+      selected.map((f) => [f.madeAt, f.poolId]),
+      [...pending.slice(0, 250), ...mature.slice(0, 500), mature[500]].map(
+        (s) => [s.observedAt, s.id],
+      ),
+    );
+  } finally {
+    db.close();
+  }
+});

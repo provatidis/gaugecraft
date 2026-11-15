@@ -50,3 +50,25 @@ test("the landing shortlist keeps its network when linked directly", () => {
   assert.deepEqual(readRoute(routeHash(route)), route);
   assert.equal(readRoute("#markets").page, "markets");
 });
+test("two-pool comparison links restore the current selection without personal settings", () => {
+  const first = "8453:0xabcdef0000000000000000000000000000000001";
+  const second = "8453:0xabcdef0000000000000000000000000000000002";
+  for (const compare of ["choose", first]) {
+    const route = readRoute(`#opportunities?network=Base&compare=${compare}`);
+    assert.equal(route.compareWith, compare);
+    assert.deepEqual(readRoute(routeHash(route)), route);
+  }
+  const pair = readRoute(
+    `#simulator?mode=demo&pool=${first}&compare=${second}&power=42123&percent=35`,
+  );
+  assert.equal(pair.pool, first);
+  assert.equal(pair.compareWith, second);
+  assert.deepEqual(readRoute(routeHash(pair)), pair);
+  assert.doesNotMatch(routeHash(pair), /power=|percent=/);
+  assert.equal(readRoute(`#simulator?compare=${second}`).compareWith, "");
+  assert.equal(
+    readRoute(`#simulator?pool=${first}&compare=choose`).compareWith,
+    "",
+  );
+  assert.equal(readRoute(`#markets?compare=${second}`).compareWith, "");
+});
