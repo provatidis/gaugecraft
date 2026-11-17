@@ -372,6 +372,12 @@ export class Store {
       .all(mode, limit)
       .map((r) => this.prediction(r));
   }
+  forecastById(mode: Mode, id: string, includeRaw = false) {
+    const row = this.db
+      .prepare("SELECT body,input_hash FROM forecasts WHERE mode=? AND id=?")
+      .get(mode, id);
+    return row ? this.prediction(row, includeRaw) : undefined;
+  }
   evaluationForecasts(
     mode: Mode,
     now: number,

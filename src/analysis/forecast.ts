@@ -20,6 +20,11 @@ import {
   historyCoverage,
   PERSISTENCE_REQUIREMENTS,
 } from "./coverage.js";
+import {
+  alignedFeeWindow,
+  tapeEligibleFees,
+  type FeeTapeLookup,
+} from "./fee-window.js";
 export { historyCoverage } from "./coverage.js";
 export const MODEL = "transparent-v1.1";
 export function forecast(snapshot: Snapshot, history: Snapshot[]): Forecast {
@@ -223,6 +228,7 @@ export function evaluateForecast(
   f: Forecast,
   history: Snapshot[],
   now: number,
+  feeTape?: FeeTapeLookup,
 ): Evaluation {
   const result: Evaluation = {
     forecastId: f.id,
@@ -285,15 +291,19 @@ export function evaluateForecast(
     )
   )
     return incomplete("The gap between observations exceeds 75 minutes.");
-  if (
-    Math.abs(end.windowStart - f.madeAt) > 45 * 60 ||
-    Math.abs(end.windowEnd - f.dueAt) > 45 * 60
-  )
-    return incomplete(
-      "The recorded fee window starts or ends more than 45 minutes from the forecast window.",
-    );
-  if (end.eligibleFees48hUsd === null)
-    return incomplete("The endpoint has no priced eligible-fee total.");
+  const aligned = alignedFeeWindow(end, f.madeAt, f.dueAt);
+  let eligible = aligned ? end.eligibleFees48hUsd : null;
+  if (eligible === null) {
+    const measured = feeTape && tapeEligibleFees(f, cover, end, feeTape);
+    if (!measured)
+      return incomplete(
+        aligned
+          ? "The endpoint has no priced eligible-fee total."
+          : "The recorded fee window misses the forecast window and verified fee counters are unavailable.",
+      );
+    eligible = measured.eligible;
+    result.feeWindowEvidence = measured.evidence;
+  }
   if (end.programs === null)
     return incomplete("The endpoint incentive schedule is unavailable.");
   if (cover.some((s) => s.allocation === null))
@@ -302,10 +312,7 @@ export function evaluateForecast(
     );
   // This is explicitly an observed-data proxy, NOT a realized wallet claim. Never sum overlapping rolling fees.
   const actualIncentives = incentives(end.programs, f.madeAt, f.dueAt);
-  result.observedRevenueProxy = sumKnown([
-    end.eligibleFees48hUsd,
-    actualIncentives,
-  ]);
+  result.observedRevenueProxy = sumKnown([eligible, actualIncentives]);
   if (result.observedRevenueProxy === null) {
     result.reason = "A realized-window incentive price is unavailable.";
     return result;
@@ -332,13 +339,13 @@ export function evaluateForecast(
       );
     const inc = cumulative - previousIncentives;
     previousIncentives = cumulative;
-    earnings +=
-      share * ((end.eligibleFees48hUsd * (right - left)) / HORIZON + inc);
+    earnings += share * ((eligible * (right - left)) / HORIZON + inc);
   }
   result.observedReturnProxy = earnings;
   result.status = "proxy";
-  result.reason =
-    "Observed-window proxy: endpoint trailing eligible-fee approximation, uniform fee timing, endpoint prices, exact incentive schedules and sampled competing supply. Not realized claims or an event-level backtest.";
+  result.reason = result.feeWindowEvidence
+    ? "Gross trading fees came from the difference between verified pool counters at the opening and closing blocks. The estimate uses the ending staked-liquidity fraction and prices, uniform fee timing, scheduled incentives and sampled competing power."
+    : "Observed-window proxy: endpoint trailing eligible-fee approximation, uniform fee timing, endpoint prices, exact incentive schedules and sampled competing supply. Not realized claims or an event-level backtest.";
   const start = cover[0];
   if (
     start.feeAccumulator0 !== null &&

@@ -1,11 +1,13 @@
 import { createServer } from "node:http";
 import { access } from "node:fs/promises";
 import { databasePath, Store } from "./store.js";
-import { scheduleCollector } from "./collector.js";
+import { configuredChains, scheduleCollector } from "./collector.js";
 import { scheduleBackups } from "./backup-scheduler.js";
 import { restoreFromObjects } from "./object-backup.js";
 import { schedulePilot } from "./lp-pilot.js";
 import { handler } from "./http.js";
+import { scheduleFeeTape } from "./fee-tape-evidence.js";
+import { readFeeTape, supportedFeeTape } from "./sources/fee-tape.js";
 const path = databasePath();
 try {
   await access(path);
@@ -56,10 +58,21 @@ const server = createServer(
   }),
 );
 let stop = async () => {};
+let stopFeeTape = async () => {};
 server.listen(port, process.env.HOST || "127.0.0.1", () => {
   console.log(`Gaugecraft listening on port ${port}`);
-  if (process.env.COLLECT !== "0")
+  if (process.env.COLLECT !== "0") {
     stop = scheduleCollector(store, () => !backups.status.running);
+    const networks = new Set(configuredChains());
+    stopFeeTape = scheduleFeeTape(
+      store,
+      {
+        supports: (s) => networks.has(s.chainId) && supportedFeeTape(s),
+        read: readFeeTape,
+      },
+      () => backups.status.running,
+    );
+  }
 });
 let closing = false;
 for (const signal of ["SIGINT", "SIGTERM"] as const)
@@ -75,6 +88,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     server.closeIdleConnections();
     await Promise.all([
       stop(),
+      stopFeeTape(),
       pilot.stop(),
       backups.stop(),
       drained,

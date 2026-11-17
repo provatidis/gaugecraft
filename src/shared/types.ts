@@ -150,4 +150,24 @@ export interface Evaluation {
   returnError: Maybe;
   returnPctError: Maybe;
   observedFeeReturnPer1000: Maybe;
+  // Older exports used only the protocol's trailing window and omit this field.
+  feeWindowEvidence?: {
+    tape: string;
+    startAt: number;
+    endAt: number;
+    startBlock: string;
+    endBlock: string;
+    startHash: string;
+    endHash: string;
+    fee0Raw: string;
+    fee1Raw: string;
+  };
+}
+
+export interface FeeTapePoint {
+  tape: string;
+  blockHash: string;
+  fee0: string;
+  fee1: string;
+  lastSwapAt: number;
 }

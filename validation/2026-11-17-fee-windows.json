@@ -1,0 +1,128 @@
+{
+  "asOf": "2026-11-17T18:45:36Z",
+  "decisionRangeUtc": [
+    "2026-11-13T17:00:48Z",
+    "2026-11-15T18:30:49Z"
+  ],
+  "chainId": 8453,
+  "pool": "0x4a7af46bc8abc00048c6c7920a1488daf568366c",
+  "tape": "0x27d5eb73e7406675f6b0cbd037490ec3dba935a4",
+  "tokens": [
+    {
+      "symbol": "WETH",
+      "decimals": 18
+    },
+    {
+      "symbol": "USDC",
+      "decimals": 6
+    }
+  ],
+  "source": [
+    "https://github.com/dromos-labs/metadex-slipstream-public/blob/f99f2095918cab69eafeffa2c3d0a8762de737b7/contracts/core/interfaces/tape/ICLPoolTape.sol",
+    "https://github.com/dromos-labs/metadex-slipstream-public/blob/f99f2095918cab69eafeffa2c3d0a8762de737b7/deployment-addresses/cl-base.json"
+  ],
+  "method": [
+    "Replayed the 100 mature decisions in the saved public Performance response. The highest-fee and highest-reward rules chose the same pool in each of these decisions.",
+    "Read CLPoolTape.accumulators(pool) with eth_call at the recorded canonical block hash. Subtracted cumulativeFee0 and cumulativeFee1 as integers. These total-fee counters already include any MEV fee.",
+    "Both source observations for each replayed WETH/USDC 48-hour interval precede the corresponding forecast boundary by at most 21 seconds. For selected positive-return examples below, the valuation block is the separate first qualifying observation at or after maturity.",
+    "Read Sugar.byAddress(pool,172800) at each valuation hash and verified the published window boundaries. Reconstructed the WETH mark from the original published rolling eligible-fee USD amount, the native rolling fees, the gauge-liquidity fraction and the collector’s USDC dollar anchor. Reconstructed the AERO mark from the sole overlapping program’s native schedule and its published forward USD value.",
+    "Applied endpoint prices and staked fraction to the measured gross fees. Distributed fees uniformly through the holding period and integrated the hypothetical 1,000-power share against the original half-hourly competing-power observations and incentive schedule."
+  ],
+  "results": {
+    "savedDecisions": 100,
+    "originalPairedHighestFeeWindows": 1,
+    "wethUsdcSelected": 99,
+    "checkedCanonicalBlocks": 197,
+    "uniqueDecisionBoundaryBlocks": 194,
+    "wethUsdcWindowsWithBothAlignedCounters": 99,
+    "matchedHighestFeeWindows": 97,
+    "matchesUsingTape": 96,
+    "matchesUsingAlignedRollingFees": 1,
+    "meanShortlistProxyUsdPer1000": 1.6085204303,
+    "meanHighestFeeProxyUsdPer1000": 0.568293409
+  },
+  "examples": [
+    {
+      "forecastId": "live:8453:0x4a7af46bc8abc00048c6c7920a1488daf568366c:1794589219:transparent-v1",
+      "decisionAt": "2026-11-13T17:00:48Z",
+      "start": {
+        "block": "56994123",
+        "blockHash": "0xd1e582a867b9df143233bc05c5afa1205b4ee355404260eef633004b185704f9",
+        "observedAt": "2026-11-13T17:00:00Z",
+        "cumulativeFee0": "114917405700735880520",
+        "cumulativeFee1": "235812743537"
+      },
+      "end": {
+        "block": "57858123",
+        "blockHash": "0x764c12cea440f88862d161e6d656dae6f134491eea741b74106cfa1f5dcf15ae",
+        "observedAt": "2026-11-15T17:00:00Z",
+        "cumulativeFee0": "138239458511888733088",
+        "cumulativeFee1": "272373522756"
+      },
+      "valuationBlock": "57867123",
+      "valuationBlockHash": "0xa424cd1a4664ed9b29cac9c4f9e413ac71fd477b85c1c3d1ee21f2b86505cb94",
+      "fee0Delta": "23322052811152852568",
+      "fee1Delta": "36560779219",
+      "eligibleFeesUsd": 55766.01394696,
+      "modeledFeeReturnPer1000": 0.5174751084,
+      "modeledIncentiveReturnPer1000": 2.48e-08,
+      "modeledTotalReturnPer1000": 0.5174751332
+    },
+    {
+      "forecastId": "live:8453:0x4a7af46bc8abc00048c6c7920a1488daf568366c:1794675619:transparent-v1",
+      "decisionAt": "2026-11-14T17:00:49Z",
+      "start": {
+        "block": "57426123",
+        "blockHash": "0x9e64dc81d5ce706c7cc0cf61ccfda10c706e1db9b5da7055207d493aedb0d3be",
+        "observedAt": "2026-11-14T17:00:00Z",
+        "cumulativeFee0": "127170186073765749133",
+        "cumulativeFee1": "254776430835"
+      },
+      "end": {
+        "block": "58290123",
+        "blockHash": "0xc4b5edde873d77c1c90845927f334180a90417058063ea3213d582f3cb4dfe28",
+        "observedAt": "2026-11-16T17:00:00Z",
+        "cumulativeFee0": "147260691390975087232",
+        "cumulativeFee1": "285431889339"
+      },
+      "valuationBlock": "58299123",
+      "valuationBlockHash": "0x164e30676bcf17795f43ee26b6bbbe004e8a66b622c1ffc97efb8a27c71ebf18",
+      "fee0Delta": "20090505317209338099",
+      "fee1Delta": "30655458504",
+      "eligibleFeesUsd": 56007.73056204,
+      "modeledFeeReturnPer1000": 0.5544446838,
+      "modeledIncentiveReturnPer1000": 3.83e-08,
+      "modeledTotalReturnPer1000": 0.5544447221
+    },
+    {
+      "forecastId": "live:8453:0x4a7af46bc8abc00048c6c7920a1488daf568366c:1794765619:transparent-v1",
+      "decisionAt": "2026-11-15T18:00:50Z",
+      "start": {
+        "block": "57876123",
+        "blockHash": "0x6c194738826ba824102b7b893977d1df3b61751bc025596c5bc43e927a3cbd12",
+        "observedAt": "2026-11-15T18:00:00Z",
+        "cumulativeFee0": "138626165766381429586",
+        "cumulativeFee1": "272595534932"
+      },
+      "end": {
+        "block": "58740123",
+        "blockHash": "0xc374e28de99e3867ce3e82006c1892a11456b8f0dc3135e17a1a7ceb19a323ee",
+        "observedAt": "2026-11-17T18:00:00Z",
+        "cumulativeFee0": "153695532858161273478",
+        "cumulativeFee1": "296117953059"
+      },
+      "valuationBlock": "58749123",
+      "valuationBlockHash": "0xd879d4c9f7d854ecf9816a64a8e4436710fdac84b84cd709695ce4d08f83a002",
+      "fee0Delta": "15069367091779843892",
+      "fee1Delta": "23522418127",
+      "eligibleFeesUsd": 34865.49805102,
+      "modeledFeeReturnPer1000": 0.3726069531,
+      "modeledIncentiveReturnPer1000": 4.28e-08,
+      "modeledTotalReturnPer1000": 0.3726069959
+    }
+  ],
+  "limitations": [
+    "The 48-hour cohorts overlap. USD prices, historical fee eligibility, competing supply between samples and personal income are estimates.",
+    "This report refers to the frozen historical sample at the stated time. The public Performance page advances to newer decisions."
+  ]
+}

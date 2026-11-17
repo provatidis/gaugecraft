@@ -37,6 +37,7 @@ function compareRule(
 ) {
   const exclusions = new Map<string, number>();
   let matched = 0,
+    counterWindows = 0,
     samePick = 0,
     shortlistTotal = 0,
     benchmarkTotal = 0;
@@ -45,6 +46,7 @@ function compareRule(
     const rival = byId.get(choices[key] ?? "");
     if (hasReturn(chosen) && hasReturn(rival)) {
       matched++;
+      if (chosen.feeWindowEvidence || rival.feeWindowEvidence) counterWindows++;
       if (chosen.poolId === rival.poolId) samePick++;
       shortlistTotal += chosen.observedReturnProxy;
       benchmarkTotal += rival.observedReturnProxy;
@@ -62,6 +64,7 @@ function compareRule(
   return {
     key,
     matched,
+    counterWindows,
     samePick,
     shortlistMean: matched ? shortlistTotal / matched : null,
     benchmarkMean: matched ? benchmarkTotal / matched : null,

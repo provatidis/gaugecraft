@@ -1,6 +1,7 @@
 import { evaluateForecast } from "../src/analysis/forecast.js";
 import type { Forecast, Mode } from "../src/shared/types.js";
 import type { Store } from "./store.js";
+import { feeTapeReader } from "./fee-tape-evidence.js";
 
 export function performance(
   store: Store,
@@ -18,6 +19,7 @@ export function performance(
     false,
   );
   const mature = new Map<string, Forecast[]>();
+  const feeTape = mode === "live" ? feeTapeReader(store.db) : undefined;
   for (const f of selected) {
     if (f.dueAt > now) continue;
     const group = mature.get(f.poolId);
@@ -31,7 +33,7 @@ export function performance(
     const to = Math.min(now, Math.max(...forecasts.map((f) => f.dueAt)) + 2700);
     const history = store.history(mode, pool, from, to, false);
     for (const f of forecasts)
-      completed.set(f.id, evaluateForecast(f, history, now));
+      completed.set(f.id, evaluateForecast(f, history, now, feeTape));
   }
   const evaluations = selected.map(
     (f) => completed.get(f.id) ?? evaluateForecast(f, [], now),

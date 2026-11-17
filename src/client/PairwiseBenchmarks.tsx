@@ -61,6 +61,13 @@ export function PairwiseBenchmarks({
                 <p>
                   {row.matched} of {total} windows matched
                 </p>
+                {row.counterWindows > 0 && (
+                  <p>
+                    {row.counterWindows} matched{" "}
+                    {row.counterWindows === 1 ? "window used" : "windows used"}{" "}
+                    recorded pool fee counters for at least one pick.
+                  </p>
+                )}
                 <dl>
                   <div>
                     <dt>Shortlist</dt>

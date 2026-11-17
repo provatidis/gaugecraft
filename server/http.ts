@@ -11,6 +11,7 @@ import { pipeline } from "node:stream/promises";
 import { Store } from "./store.js";
 import { markets, overviewRows, poolCoverage } from "./markets.js";
 import { performance } from "./performance.js";
+import { feeTapeRevision } from "./fee-tape-evidence.js";
 import { csvLines } from "./csv.js";
 import { configuredChains } from "./collector.js";
 import { dataHealth } from "../src/analysis/freshness.js";
@@ -148,7 +149,7 @@ export function handler(
   >();
   const inFlight = new Map<Mode, Promise<StateBody>>();
   async function performanceBody(mode: Mode): Promise<StateBody> {
-    const rev = `${revision()}:${decisionRevision.get()!.id}`;
+    const rev = `${revision()}:${decisionRevision.get()!.id}:${mode === "live" ? feeTapeRevision(store.db) : 0}`;
     const now = clock();
     const old = evaluations.get(mode);
     if (old && old.revision === rev && now >= old.from && now < old.until)

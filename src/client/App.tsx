@@ -2745,11 +2745,11 @@ function Performance({
         </div>
       )}
       <div className="notice">
-        <b>Evaluation is an observed-data proxy.</b> Trailing eligible fees are
-        approximated at the endpoint, fee timing is uniform, incentives use
-        their actual schedules, and allocation shares use collected snapshots.
-        This is not a wallet’s realized return or an event-level backtest.
-        Overlapping trailing windows are never summed.
+        <b>How observed earnings are estimated.</b> Fees come from a matching
+        protocol window or the change in pool fee counters between two verified
+        blocks. Both use the ending token prices and staked-liquidity fraction.
+        The calculation spreads fees across the holding period and applies
+        scheduled incentives and observed changes in competing power.
       </div>
       <details className="panel benchmark-four">
         <summary>
@@ -2923,6 +2923,15 @@ function Performance({
                       <details className="evaluation-reason">
                         <summary>Why this status?</summary>
                         <p>{e.reason}</p>
+                        {e.feeWindowEvidence && (
+                          <p>
+                            Fee counters covered{" "}
+                            {date(e.feeWindowEvidence.startAt)} through{" "}
+                            {date(e.feeWindowEvidence.endAt)}, blocks{" "}
+                            {e.feeWindowEvidence.startBlock}–
+                            {e.feeWindowEvidence.endBlock}.
+                          </p>
+                        )}
                       </details>
                     </td>
                   </tr>
@@ -2957,10 +2966,10 @@ function Performance({
         <h3>What this evaluation can tell you</h3>
         <p>
           Revenue and allocation errors are reported separately. Percentage
-          error is unavailable when the observed denominator is zero. Benchmark
-          means use only cohorts where every strategy has a complete evaluation,
-          and represent independent 48-hour holds rather than a compounded
-          strategy.
+          error is unavailable when the observed denominator is zero. Each
+          benchmark compares the two picks from the same saved decision when
+          both outcomes are measurable. The four-way table requires a complete
+          outcome for all four picks.
         </p>
         <p>
           These overlapping forecast cohorts are correlated. The MVP does not
