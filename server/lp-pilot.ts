@@ -261,6 +261,7 @@ export function schedulePilot(
     const started = Date.now(),
       cpu = process.cpuUsage();
     let changed = false;
+    let scoreFailed = false;
     if (newDay || due.length) {
       const head = await reader.head();
       if (newDay && Math.floor(head.at / DAY) === day) {
@@ -269,20 +270,28 @@ export function schedulePilot(
         changed = true;
       }
       for (const old of due) {
-        const near = await reader.at(head.at - 600, head, 2);
-        const rate = (head.at - near.at) / (head.block - near.block);
-        const target = await reader.at(old.point.at + WEEK, head, rate);
-        const canonical = await reader.rpc.retry(() =>
-          reader.rpc.client.getBlock({ blockNumber: BigInt(old.point.block) }),
-        );
-        if (canonical.hash !== old.point.hash)
-          throw new Error("LP decision block changed");
-        const decision = await score(reader, old, await reader.week(target));
-        await save({
-          ...ledger,
-          days: ledger.days.map((x) => (x === old ? { ...x, decision } : x)),
-        });
-        changed = true;
+        try {
+          const near = await reader.at(head.at - 600, head, 2);
+          const rate = (head.at - near.at) / (head.block - near.block);
+          const target = await reader.at(old.point.at + WEEK, head, rate);
+          const canonical = await reader.rpc.retry(() =>
+            reader.rpc.client.getBlock({
+              blockNumber: BigInt(old.point.block),
+            }),
+          );
+          if (canonical.hash !== old.point.hash)
+            throw new Error("LP decision block changed");
+          const decision = await score(reader, old, await reader.week(target));
+          await save({
+            ...ledger,
+            days: ledger.days.map((x) => (x === old ? { ...x, decision } : x)),
+          });
+          changed = true;
+        } catch {
+          // One unavailable historical window must not prevent archiving newer decisions.
+          scoreFailed = true;
+          console.error("LP outcome pending for Base block", old.point.block);
+        }
       }
     }
     const body = JSON.stringify(ledger),
@@ -313,6 +322,7 @@ export function schedulePilot(
         }),
       );
     }
+    if (scoreFailed) throw new Error("A mature LP window needs another read");
   }
   function tick() {
     if (!enabled || stopped || active || Date.now() < next || backupRunning())
@@ -320,15 +330,19 @@ export function schedulePilot(
     active = collect()
       .then(() => {
         const now = Date.now() / 1000;
-        const opening =
-          ledger.days.length === 0 ||
-          Math.floor(now / DAY) - Math.floor(ledger.days[0].point.at / DAY) <
-            27;
-        const nextDay = !ledger.days.length
-          ? now + 60
-          : opening
-            ? (Math.floor(now / DAY) + 1) * DAY + 60
-            : Infinity;
+        const today = Math.floor(now / DAY);
+        const dayIndex = ledger.days.length
+          ? today - Math.floor(ledger.days[0].point.at / DAY)
+          : 0;
+        const publishedToday = ledger.days.some(
+          (x) => Math.floor(x.point.at / DAY) === today,
+        );
+        const nextDay =
+          !publishedToday && dayIndex < 28
+            ? now + 60
+            : dayIndex < 27
+              ? (today + 1) * DAY + 60
+              : Infinity;
         const deadlines = ledger.days
           .filter((x) => !x.decision.scoredAt)
           .map((x) => x.point.at + WEEK + 181);

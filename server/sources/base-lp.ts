@@ -276,16 +276,20 @@ export class BaseLpReader {
       valid.map(({ m }) => query(m.gauge, "gaugeFactory")),
       point.block,
     );
-    for (const [i, { pool, m }] of valid.entries()) {
-      const factory = factories[i];
-      if (typeof factory !== "string") continue;
-      const [ref, pen] = await this.batch(
-        [
-          query(factory, "referralConfig", [m.gauge]),
-          query(factory, "effectivePenaltyConfig", [m.gauge]),
-        ],
-        point.block,
-      );
+    const gauges = valid.flatMap(({ pool, m }, i) =>
+      typeof factories[i] === "string"
+        ? [{ pool, gauge: m.gauge, factory: factories[i] as string }]
+        : [],
+    );
+    const configs = await this.batch(
+      gauges.flatMap(({ factory, gauge }) => [
+        query(factory, "referralConfig", [gauge]),
+        query(factory, "effectivePenaltyConfig", [gauge]),
+      ]),
+      point.block,
+    );
+    for (const [i, { pool }] of gauges.entries()) {
+      const [ref, pen] = configs.slice(2 * i, 2 * i + 2);
       if (Array.isArray(ref) && Array.isArray(pen)) {
         Object.assign(terms[pool.address], {
           referral: BigInt(ref[0]) === 0n ? 0 : Number(ref[1]) / 1e6,

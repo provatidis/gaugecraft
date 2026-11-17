@@ -160,11 +160,10 @@ export default function Liquidity({ refresh }: { refresh: number }) {
                     : modeName[pick.mode] + " in CL" + q.spacing}
                 </h2>
                 <p>
-                  {pick.mode === "hold"
-                    ? "The strongest eligible LP position trails holding by "
-                    : "The strongest eligible LP position leads holding by "}
-                  <strong>{usd(Math.abs(best.edge))}</strong> if the past week’s
-                  price move and earnings repeat.
+                  {best.mode === "fees" ? "Keeping fees" : "Staking for AERO"}{" "}
+                  in CL{q.spacing} {pick.mode === "hold" ? "trails" : "leads"}{" "}
+                  holding by <strong>{usd(Math.abs(best.edge))}</strong> if the
+                  past week’s price move and earnings repeat.
                 </p>
                 <div className="lp-values">
                   <div>

@@ -24,6 +24,13 @@
   min-height: 42px;
   font: inherit;
 }
+.lp-inputs input {
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--foreground);
+}
 .lp-asof,
 .lp-note {
   font-size: 0.88rem;
