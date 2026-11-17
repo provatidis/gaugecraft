@@ -4,6 +4,7 @@ import type {
   ProspectiveView,
 } from "../shared/prospective.js";
 import { date, earningsDifference, earningsMoney } from "./format.js";
+import { feeTimingNote } from "./fee-timing-note.js";
 import "./prospective.css";
 
 const names: Record<ProspectiveRule, string> = {
@@ -182,6 +183,7 @@ export function ProspectiveComparisonPanel({
             complete pair of outcomes. See the hold record for each reason.
           </p>
         )}
+        <p>{feeTimingNote}</p>
       </div>
       {view.mature > 0 && benchmarks.length > 0 && (
         <details className="prospective-detail">

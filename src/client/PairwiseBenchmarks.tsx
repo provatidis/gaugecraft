@@ -3,6 +3,7 @@ import {
   type performanceSummary,
 } from "../analysis/performance-summary.js";
 import { earningsDifference, earningsMoney } from "./format.js";
+import { feeTimingNote } from "./fee-timing-note.js";
 import "./benchmarks.css";
 
 export function PairwiseBenchmarks({
@@ -47,6 +48,7 @@ export function PairwiseBenchmarks({
               1,000 additional power over 48 hours.
             </p>
           )}
+          <p className="benchmark-note">{feeTimingNote}</p>
           <div className="benchmark-pairs">
             {comparisons.map((row) => (
               <article key={row.key} className="benchmark-pair">
