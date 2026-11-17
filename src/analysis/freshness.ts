@@ -4,7 +4,8 @@ export const MAX_OBSERVATION_AGE = 75 * 60;
 export function isFresh(snapshot: Snapshot, now = Date.now() / 1000) {
   return (
     snapshot.mode === "demo" ||
-    now - snapshot.retrievedAt <= MAX_OBSERVATION_AGE
+    now - Math.min(snapshot.observedAt, snapshot.retrievedAt) <=
+      MAX_OBSERVATION_AGE
   );
 }
 

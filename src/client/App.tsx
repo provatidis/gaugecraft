@@ -28,8 +28,9 @@ import {
   EVIDENCE_LABELS,
   type EarningsComparison,
 } from "../analysis/earnings.js";
+import { PERSISTENCE_REQUIREMENTS } from "../analysis/coverage.js";
 import { splitCompatibilityError } from "../analysis/split.js";
-import { shortlist } from "./shortlist.js";
+import { shortlist } from "../analysis/shortlist.js";
 import { AllocationSize } from "./AllocationSize.js";
 import { SplitComparison } from "./SplitComparison.js";
 import { PoolPicker } from "./PoolPicker.js";
@@ -49,8 +50,10 @@ import {
 import { ContextHelp, GettingStarted, Guide } from "./Guide.js";
 const Liquidity = React.lazy(() => import("./Liquidity.js"));
 const HistoryChart = React.lazy(() => import("./HistoryChart.js"));
-// A tab can outlive the deployment that supplied its chart chunk.
-class ChartBoundary extends React.Component<React.PropsWithChildren> {
+// An open tab can outlive the deployment that supplied its deferred views.
+class ViewBoundary extends React.Component<
+  React.PropsWithChildren<{ label: string }>
+> {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
@@ -58,9 +61,9 @@ class ChartBoundary extends React.Component<React.PropsWithChildren> {
   render() {
     return this.state.failed ? (
       <div className="notice warning" role="status">
-        The chart display could not be loaded.{" "}
+        {this.props.label} could not be loaded.{" "}
         <button className="text-link" onClick={() => window.location.reload()}>
-          Reload charts
+          Reload page
         </button>
       </div>
     ) : (
@@ -130,7 +133,7 @@ const metricInfo: Record<string, string> = {
   earnings:
     "Modeled USD earnings for the entered total power (or 1,000 additional reference power), including own dilution. History-based estimates and full-window baselines are sorted separately. Assumes immediate allocation and constant own power; use Simulator for timing and decay.",
   stress:
-    "Same power, with forecast fees reduced 50% and other projected allocation increased 50%. Scheduled incentive USD value is unchanged. A stress assumption, not a confidence interval.",
+    "Stress halves forecast fees and adds 50% to projected competing power. Scheduled incentives keep their modeled USD value. Opportunities also lets you test whether past allocators return.",
   evidence:
     "History-based estimates meet the persistence coverage requirements. Baselines hold current conditions constant. Partial fee windows cannot support a comparable 48-hour earnings estimate.",
   stakeApr:
@@ -205,6 +208,7 @@ export default function App() {
   } = useResearchRoute(savedMode);
   const { mode, page, pool: selected } = route;
   const lp = page === "liquidity";
+  const usesMarkets = !lp && page !== "guide" && page !== "performance";
   const now = useObservationClock();
   const marketScroll = useRef({ top: 0, left: 0 });
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -261,7 +265,7 @@ export default function App() {
   }
   const showGuide = () => navigate("guide");
   useEffect(() => {
-    if (lp) return;
+    if (!usesMarkets) return;
     const abort = new AbortController();
     let alive = true;
     setLoading(true);
@@ -306,7 +310,7 @@ export default function App() {
       window.removeEventListener("online", resume);
       document.removeEventListener("visibilitychange", resume);
     };
-  }, [mode, refresh, lp]);
+  }, [mode, refresh, usesMarkets]);
   const rows = useMemo(
     () => (state?.mode === mode ? state.markets : []),
     [state, mode],
@@ -330,9 +334,10 @@ export default function App() {
       ),
     [rows, power, existing, now],
   );
+  const returning = page === "opportunities" && route.scenario === "returning";
   const screen = useMemo(
-    () => shortlist(rows, estimates, route.market.chain),
-    [rows, estimates, route.market.chain],
+    () => shortlist(rows, estimates, route.market.chain, returning),
+    [rows, estimates, route.market.chain, returning],
   );
   const current = selected
     ? rows.find((r) => r.snapshot.id === selected)
@@ -492,26 +497,28 @@ export default function App() {
                 <option value="demo">Sample fixtures</option>
               </select>
             )}
-            <button
-              className={`icon-button ${!lp && loading ? "refreshing" : ""}`}
-              title="Refresh observations"
-              aria-label="Refresh observations"
-              aria-busy={!lp && loading}
-              disabled={!lp && loading}
-              onClick={() => setRefresh((r) => r + 1)}
-            >
-              ↻
-            </button>
+            {page !== "guide" && (
+              <button
+                className={`icon-button ${usesMarkets && loading ? "refreshing" : ""}`}
+                title="Refresh observations"
+                aria-label="Refresh observations"
+                aria-busy={usesMarkets && loading}
+                disabled={usesMarkets && loading}
+                onClick={() => setRefresh((r) => r + 1)}
+              >
+                ↻
+              </button>
+            )}
           </div>
         </header>
         <main>
-          {!lp && mode === "demo" && (
+          {!lp && page !== "guide" && mode === "demo" && (
             <div className="notice demo">
               <b>Sample fixtures</b> Every pool, metric and historical
               observation in this view is synthetic. This is not live Aero data.
             </div>
           )}
-          {!lp && error && (
+          {usesMarkets && error && (
             <div className="notice danger" role="alert">
               {error} {state ? "Showing the last loaded observations." : ""}
             </div>
@@ -530,7 +537,7 @@ export default function App() {
                 </button>
               </div>
             )}
-          {!lp && stale && (
+          {usesMarkets && stale && (
             <div className="notice warning">
               <b>
                 {health.stalePools}{" "}
@@ -566,11 +573,11 @@ export default function App() {
                 {lp
                   ? "Compare a seven-day liquidity position with holding the tokens you would deposit."
                   : page === "guide"
-                    ? "A short path from headline APR to an informed allocation scenario."
+                    ? "Choose where to direct allocation power or compare a token deposit with holding."
                     : page === "markets"
                       ? "Browse the pool directory by token, network or address. Star pools to revisit them."
                       : page === "opportunities"
-                        ? "Compare 48-hour earnings for your stake."
+                        ? "Enter your allocation power to rank pools for the next 48 hours. Open a stress amount to test the assumptions."
                         : page === "analysis"
                           ? "A record of what was observable, with each estimate kept in context."
                           : page === "simulator"
@@ -593,7 +600,7 @@ export default function App() {
               </a>
             )}
           </div>
-          {!lp && (
+          {usesMarkets && (
             <div className="freshness" role="status">
               <span
                 className={`status-dot ${last && healthy ? "" : "amber"}`}
@@ -685,14 +692,44 @@ export default function App() {
                     ))}
                 </select>
               </label>
+              <label>
+                <span>Rank by</span>
+                <select
+                  value={returning ? "returning" : "stress"}
+                  onChange={(event) =>
+                    updateRoute(
+                      {
+                        scenario:
+                          event.target.value === "returning"
+                            ? "returning"
+                            : "forecast",
+                        compareWith: "",
+                      },
+                      true,
+                    )
+                  }
+                >
+                  <option value="stress">Standard stress</option>
+                  <option value="returning">If allocators return</option>
+                </select>
+              </label>
             </AllocationSize>
           )}
           {lp ? (
-            <React.Suspense fallback={<p>Loading liquidity research…</p>}>
-              <Liquidity refresh={refresh} />
-            </React.Suspense>
+            <ViewBoundary label="Liquidity research">
+              <React.Suspense fallback={<p>Loading liquidity research…</p>}>
+                <Liquidity refresh={refresh} />
+              </React.Suspense>
+            </ViewBoundary>
           ) : page === "guide" ? (
             <Guide navigate={navigate} />
+          ) : page === "performance" ? (
+            <Performance
+              key={mode}
+              mode={mode}
+              rows={rows}
+              revision={performanceRevision}
+            />
           ) : loading && !state ? (
             <div className="loading">
               <div className="spinner" />
@@ -749,6 +786,7 @@ export default function App() {
               {page === "opportunities" && (
                 <Opportunities
                   screen={screen}
+                  returning={returning}
                   rows={rows}
                   compareWith={route.compareWith}
                   selectForSplit={(compareWith) => updateRoute({ compareWith })}
@@ -757,11 +795,12 @@ export default function App() {
                       page: "simulator",
                       pool: first.snapshot.id,
                       compareWith: second.snapshot.id,
-                      scenario: "forecast",
+                      scenario: returning ? "returning" : "forecast",
                     })
                   }
                   estimates={estimates}
                   power={power}
+                  reviewOutcomes={() => navigate("performance")}
                   open={open}
                   browse={() =>
                     updateRoute({
@@ -798,13 +837,6 @@ export default function App() {
                   setBasis={(scenario) => updateRoute({ scenario }, true)}
                 />
               )}
-              {page === "performance" && (
-                <Performance
-                  mode={mode}
-                  rows={rows}
-                  revision={performanceRevision}
-                />
-              )}
             </>
           )}
           <footer>
@@ -816,7 +848,7 @@ export default function App() {
               Read the methodology ↗
             </a>
           </footer>
-          {!lp && state && (
+          {usesMarkets && state && (
             <details className="source-health">
               <summary>
                 Data health ·{" "}
@@ -1618,22 +1650,26 @@ function Stat({
 }
 function Opportunities({
   screen: initialScreen,
+  returning,
   rows,
   compareWith,
   selectForSplit,
   openSplit,
   estimates,
   power,
+  reviewOutcomes,
   open,
   browse,
 }: {
   screen: ReturnType<typeof shortlist>;
+  returning: boolean;
   rows: MarketRow[];
   compareWith: string;
   selectForSplit: (id: string) => void;
   openSplit: (first: MarketRow, second: MarketRow) => void;
   estimates: Map<string, EarningsComparison>;
   power: string;
+  reviewOutcomes: () => void;
   open: (row: MarketRow, page?: Page, scenario?: ScenarioBasis) => void;
   browse: () => void;
 }) {
@@ -1646,15 +1682,25 @@ function Opportunities({
   const firstUsable =
     !!firstEstimate &&
     firstEstimate.earnings !== null &&
-    firstEstimate.stress !== null;
+    (returning
+      ? firstEstimate.returningStress != null
+      : firstEstimate.stress !== null);
   const screen = useMemo(() => {
     if (!choosingSecond) return initialScreen;
     const compatible =
       first && firstUsable
         ? rows.filter((row) => !splitCompatibilityError(first, row))
         : [];
-    return shortlist(compatible, estimates, "all");
-  }, [initialScreen, choosingSecond, first, firstUsable, rows, estimates]);
+    return shortlist(compatible, estimates, "all", returning);
+  }, [
+    initialScreen,
+    choosingSecond,
+    first,
+    firstUsable,
+    rows,
+    estimates,
+    returning,
+  ]);
   const choose = (row: MarketRow) => {
     if (first && firstUsable) openSplit(first, row);
     else selectForSplit(row.snapshot.id);
@@ -1697,7 +1743,7 @@ function Opportunities({
             ) : choosing ? (
               "Choose one pool, then a second on the same network to test a split."
             ) : ranked ? (
-              `${count} of ${screen.tracked} tracked pools qualify. Showing the top ${screen.visible.length} by stress earnings.`
+              `${count} of ${screen.tracked} tracked pools qualify. Showing the top ${screen.visible.length} by ${returning ? "earnings if allocators return" : "stress earnings"}.`
             ) : count ? (
               `Showing ${screen.visible.length} of ${count} baselines by estimated earnings. No pool in this selection qualifies for a history-based ranking.`
             ) : (
@@ -1749,11 +1795,11 @@ function Opportunities({
             directory.
           </p>
           <p>
-            For this shortlist, each pool needs an active gauge, a current
-            observation, a 47–49 hour fee window and enough priced inputs to
-            estimate your share. A history-based ranking also requires at least
-            47½ hours of history, 80 priced fee observations and no gap over 75
-            minutes.
+            Each opportunity needs positive modeled earnings, an active gauge, a
+            current observation, a 47–49 hour fee window, a priced current fee
+            total and enough other inputs to estimate your share. A
+            history-based ranking also requires at least 47½ hours of history,
+            80 priced fee readings and no collection gap over 75 minutes.
           </p>
           <p>
             Each row puts your total power into that pool immediately and holds
@@ -1762,18 +1808,26 @@ function Opportunities({
             and a two-pool split.
           </p>
           <p>
-            History-qualified pools are ordered by modeled earnings after
-            forecast fees fall 50% and projected competing power rises 50%.
-            Scheduled incentives keep their modeled value through expiry. When
-            only baselines are available, the list orders them by estimated
-            earnings under current conditions.
+            The stress case halves projected fees and adds 50% to projected
+            competing power. Choose “If allocators return” to test competing
+            power returning to its prior 48-hour median when that exceeds
+            standard stress. This option needs at least 80 allocation readings
+            spanning 47½ hours with no gap over 75 minutes. Scheduled incentives
+            keep their modeled value through expiry. When only baselines
+            qualify, the list orders them by estimated earnings under current
+            conditions.
           </p>
+          <button className="text-link" onClick={reviewOutcomes}>
+            Compare past forecasts with observed earnings →
+          </button>
         </details>
       )}
       {screen.visible.length > 0 && (
         <div className="shortlist-hint">
           {ranked
-            ? "Stress models 50% lower fees and 50% more competing power."
+            ? returning
+              ? "Fees fall 50%. Competition uses the higher of standard stress and its prior 48-hour median."
+              : "Stress halves forecast fees and increases projected competing power by 50%."
             : "Baselines hold current fees and competing power steady. Their persistence is untested."}{" "}
           {choosing
             ? ranked
@@ -1793,9 +1847,19 @@ function Opportunities({
         {screen.visible.map((row, index) => {
           const s = row.snapshot;
           const e = estimates.get(s.id)!;
+          const stressMetric = {
+            label: returning ? "If allocators return / 48h" : "Stress / 48h",
+            value: returning ? (e.returningStress ?? null) : e.stress,
+            scenario: returning ? ("returning" as const) : ("stress" as const),
+          };
+          const estimateMetric = {
+            label: "Estimate / 48h",
+            value: e.earnings,
+            scenario: "forecast" as const,
+          };
           const metrics = ranked
-            ? (["stress", "earnings"] as const)
-            : (["earnings", "stress"] as const);
+            ? [stressMetric, estimateMetric]
+            : [estimateMetric, stressMetric];
           return (
             <li key={s.id}>
               <span className="shortlist-position" aria-hidden="true">
@@ -1812,47 +1876,40 @@ function Opportunities({
               </button>
               {metrics.map((metric) =>
                 choosing ? (
-                  <div key={metric} className="shortlist-metric">
-                    <span>
-                      {metric === "stress" ? "Stress / 48h" : "Estimate / 48h"}
-                    </span>
-                    <strong>{earningsMoney(e[metric])}</strong>
+                  <div key={metric.scenario} className="shortlist-metric">
+                    <span>{metric.label}</span>
+                    <strong>{earningsMoney(metric.value)}</strong>
                   </div>
                 ) : (
                   <button
-                    key={metric}
+                    key={metric.scenario}
                     className="shortlist-metric"
-                    onClick={() =>
-                      open(
-                        row,
-                        "simulator",
-                        metric === "stress" ? "stress" : "forecast",
-                      )
-                    }
-                    aria-label={`Simulate ${metric === "stress" ? "stress" : "estimated"} earnings for ${s.token0.symbol}/${s.token1.symbol} on ${s.chain} ${short(s.address)}`}
+                    onClick={() => open(row, "simulator", metric.scenario)}
+                    aria-label={`Simulate ${metric.label} for ${s.token0.symbol}/${s.token1.symbol} on ${s.chain} ${short(s.address)}`}
                   >
-                    <span>
-                      {metric === "stress" ? "Stress / 48h" : "Estimate / 48h"}
-                    </span>
-                    <strong>{earningsMoney(e[metric])}</strong>
+                    <span>{metric.label}</span>
+                    <strong>{earningsMoney(metric.value)}</strong>
                   </button>
                 ),
               )}
               <div className="shortlist-signals">
                 <span>
-                  Incentives ·{" "}
-                  {
-                    row.forecast.signals.find(
-                      (signal) => signal.name === "Incentive runway",
-                    )?.value
-                  }
+                  Estimate mix ·{" "}
+                  {e.earnings && e.incentives !== null
+                    ? Math.round((e.incentives / e.earnings) * 100)
+                    : 0}
+                  % incentives
                 </span>
                 <small>
-                  Allocation{" "}
-                  {row.forecast.signals.find(
-                    (signal) => signal.name === "Allocation pressure",
-                  )?.value ?? "—"}
+                  {earningsMoney(e.fees)} fees + {earningsMoney(e.incentives)}{" "}
+                  incentives
                 </small>
+                {e.stressUsesMedian && (
+                  <span className="competition-note">
+                    If allocators return ·{" "}
+                    {earningsMoney(e.returningStress ?? null)}
+                  </span>
+                )}
               </div>
               <button
                 className="button secondary inspect-pool"
@@ -1875,7 +1932,7 @@ function Opportunities({
               ? "No compatible second pool"
               : invalidPower
                 ? "Enter a positive allocation power"
-                : "No comparable pools for this selection"}
+                : "No positive earning opportunities for this selection"}
           </h3>
           <p>
             {choosingSecond
@@ -1884,7 +1941,9 @@ function Opportunities({
                 : "Choose a different first pool to compare the same forecast period on its network."
               : invalidPower
                 ? "Clear the amount to try 1,000 reference power."
-                : "Open Markets to see individual fee windows, freshness and missing estimates, or choose another network."}
+                : returning
+                  ? "Try Standard stress. The return scenario requires a recorded 48-hour allocation median and positive stressed earnings."
+                  : "Open Markets to see individual fee windows, freshness and missing estimates, or choose another network."}
           </p>
         </div>
       )}
@@ -1966,10 +2025,25 @@ function Analysis({
     ],
     ["incentives48hUsd", "Scheduled incentives", "USD · next 48h estimate"],
   ];
+  const chartHistory = history.flatMap((point, i) => {
+    const prior = history[i - 1];
+    return prior &&
+      point.observedAt - prior.observedAt >
+        PERSISTENCE_REQUIREMENTS.maxGapSeconds
+      ? [{ observedAt: (prior.observedAt + point.observedAt) / 2 }, point]
+      : [point];
+  });
+  const scheduledPrograms = s.programs?.filter(
+    (p) => p.end > row.forecast.madeAt && p.start < row.forecast.dueAt,
+  );
   const events = history
     .flatMap((v, i) => {
       const p = history[i - 1];
-      if (!p) return [];
+      if (
+        !p ||
+        v.observedAt - p.observedAt > PERSISTENCE_REQUIREMENTS.maxGapSeconds
+      )
+        return [];
       const e: string[] = [];
       if (
         p.stakeApr !== null &&
@@ -2054,6 +2128,8 @@ function Analysis({
                 : historyLoaded
                   ? "No observations in the selected period"
                   : "Loading observation history…"}
+            {chartHistory.length > history.length &&
+              " · Lines break at gaps over 75 minutes."}
             {mode === "demo" && ` · Fixture window ends ${date(s.observedAt)}`}
           </p>
         </div>
@@ -2075,7 +2151,7 @@ function Analysis({
         </div>
       </div>
       {error && <div className="notice danger">{error}</div>}
-      <ChartBoundary>
+      <ViewBoundary label="Historical charts">
         <div className="chart-grid">
           {charts.map(([key, label, unit]) => (
             <div className="panel chart-card" key={key}>
@@ -2094,7 +2170,7 @@ function Analysis({
                       }
                     >
                       <HistoryChart
-                        history={history}
+                        history={chartHistory}
                         metric={key}
                         label={label}
                         days={days}
@@ -2126,7 +2202,7 @@ function Analysis({
             </div>
           ))}
         </div>
-      </ChartBoundary>
+      </ViewBoundary>
       <div className="section-line">
         <div>
           <h2>Persistence signals</h2>
@@ -2170,34 +2246,30 @@ function Analysis({
           {s.programs === null ? (
             <p>Schedule unavailable.</p>
           ) : (
-            s.programs
-              .filter(
-                (p) => p.end > s.observedAt && p.start < s.observedAt + HORIZON,
-              )
-              .map((p) => (
-                <div className="program" key={p.id}>
-                  <b>
-                    {p.token.symbol} <small>#{p.id}</small>
-                  </b>
-                  <span>
-                    {money(
-                      incentives([p], s.observedAt, s.observedAt + HORIZON),
-                    )}{" "}
-                    / next 48h
-                  </span>
-                  <small>
-                    Starts {date(p.start)}
-                    <br />
-                    Ends {date(p.end)}
-                  </small>
-                  {p.end < s.observedAt + HORIZON && (
-                    <Badge tone="warn">Expires within forecast</Badge>
-                  )}
-                </div>
-              ))
+            scheduledPrograms?.map((p) => (
+              <div className="program" key={p.id}>
+                <b>
+                  {p.token.symbol} <small>#{p.id}</small>
+                </b>
+                <span>
+                  {money(
+                    incentives([p], row.forecast.madeAt, row.forecast.dueAt),
+                  )}{" "}
+                  / next 48h
+                </span>
+                <small>
+                  Starts {date(p.start)}
+                  <br />
+                  Ends {date(p.end)}
+                </small>
+                {p.end < row.forecast.dueAt && (
+                  <Badge tone="warn">Expires within forecast</Badge>
+                )}
+              </div>
+            ))
           )}
-          {s.programs?.length === 0 && (
-            <p>No incentive programs returned by the rewards contract.</p>
+          {scheduledPrograms?.length === 0 && (
+            <p>No incentive program overlaps this forecast’s 48 hours.</p>
           )}
         </div>
       </div>
@@ -2263,6 +2335,21 @@ function Simulator({
     activationDelayHours: Number(fields.activationDelayHours),
   };
   const marketEstimate = comparison(row, allocationSettings, now);
+  const stressFees = basis === "stress" || basis === "returning";
+  const comparable =
+    basis === "current"
+      ? simulateAllocation(
+          row,
+          { ...input, activationDelayHours: 0, remainingDays: null },
+          "current",
+          undefined,
+          now,
+        ).earnings
+      : basis === "returning"
+        ? (marketEstimate.returningStress ?? null)
+        : stressFees
+          ? marketEstimate.stress
+          : marketEstimate.earnings;
   const customTiming =
     input.activationDelayHours !== 0 || input.remainingDays !== null;
   const outputs = SCENARIOS.map((s) => ({
@@ -2306,16 +2393,27 @@ function Simulator({
               <option value="stress">
                 Markets stress · lower fees, more competition
               </option>
+              <option
+                value="returning"
+                disabled={
+                  marketEstimate.returningStress == null &&
+                  basis !== "returning"
+                }
+              >
+                If allocators return · 48h competition history
+              </option>
               <option value="current">
                 Current competition · fixed baseline
               </option>
             </select>
             <small>
-              {basis === "stress"
-                ? "Forecast fees −50%, projected other power +50%. Scheduled incentive value is unchanged."
-                : basis === "forecast"
-                  ? "Uses the same projected competing power and revenue as Markets."
-                  : "Holds competing power at the current observation; forecast fees and incentive schedules still apply."}
+              {basis === "returning"
+                ? "Forecast fees fall 50%. Competition uses the higher of standard stress and its prior 48-hour median. Any existing power you enter is assumed to have been present throughout that history."
+                : basis === "stress"
+                  ? "Forecast fees fall 50% and projected competing power rises 50%. Scheduled incentives keep their modeled value."
+                  : basis === "forecast"
+                    ? "Uses the same projected competing power and revenue as Markets."
+                    : "Holds competing power at the current observation; forecast fees and incentive schedules still apply."}
             </small>
           </label>
           {allocationSettings.power.trim() === "" && (
@@ -2415,16 +2513,10 @@ function Simulator({
                 {outputs[0].error ??
                   `${pct(outputs[0].share === null ? null : outputs[0].share * 100)} initial share after your allocation`}
               </p>
-              {marketEstimate.earnings !== null && customTiming ? (
+              {comparable !== null && customTiming ? (
                 <p className="market-estimate-note">
-                  Saved timing and stake decay are applied. Markets assumes
-                  immediate allocation and constant power (
-                  {earningsMoney(
-                    basis === "stress"
-                      ? marketEstimate.stress
-                      : marketEstimate.earnings,
-                  )}
-                  {basis === "stress" ? " stress" : " estimate"}).{" "}
+                  With immediate allocation and constant power, this scenario
+                  estimates {earningsMoney(comparable)}.{" "}
                   <button
                     className="text-link"
                     onClick={() =>
@@ -2438,16 +2530,12 @@ function Simulator({
                     Use immediate, constant power
                   </button>
                 </p>
-              ) : marketEstimate.earnings === null ? (
-                <p className="market-estimate-note">
-                  Comparable earnings are unavailable: {marketEstimate.reason}.
-                </p>
-              ) : (
+              ) : comparable === null ? null : (
                 <p className="market-estimate-note">
                   Immediate allocation, constant own power.{" "}
                   {basis === "current"
                     ? "Current competition is an alternative assumption."
-                    : "Matches the selected Markets figure."}
+                    : "Matches the selected comparison at this power."}
                 </p>
               )}
             </div>
@@ -2467,13 +2555,12 @@ function Simulator({
                   {money(
                     row.forecast.projectedFees === null
                       ? null
-                      : row.forecast.projectedFees *
-                          (basis === "stress" ? 0.5 : 1),
+                      : row.forecast.projectedFees * (stressFees ? 0.5 : 1),
                   )}
                 </b>
                 <small>
                   {row.forecast.basis === "history"
-                    ? basis === "stress"
+                    ? stressFees
                       ? "History forecast reduced by 50%"
                       : "Conservative history heuristic"
                     : "Current baseline · insufficient history"}
@@ -2562,6 +2649,7 @@ function Simulator({
 interface PerformanceData {
   evaluations: Evaluation[];
   decisions: { at: number; choices: Record<string, string | null> }[];
+  poolLabels?: Record<string, string>;
   scope: string;
   totalStored: number;
 }
@@ -2612,6 +2700,7 @@ function Performance({
     <>
       <PairwiseBenchmarks
         comparisons={summary.comparisons}
+        shortlistAccuracy={summary.shortlistAccuracy}
         total={data.decisions.length}
       />
       <div className="stat-grid">
@@ -2792,9 +2881,10 @@ function Performance({
                   <tr key={e.forecastId}>
                     <td>
                       <b>
-                        {pools.has(e.poolId)
-                          ? `${pools.get(e.poolId)!.token0.symbol}/${pools.get(e.poolId)!.token1.symbol}`
-                          : "Pool"}
+                        {data.poolLabels?.[e.poolId] ??
+                          (pools.has(e.poolId)
+                            ? `${pools.get(e.poolId)!.token0.symbol}/${pools.get(e.poolId)!.token1.symbol}`
+                            : "Archived pool")}
                       </b>
                       <small>
                         <code title={e.poolId}>{short(e.poolId)}</code>

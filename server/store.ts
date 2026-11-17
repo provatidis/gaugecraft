@@ -4,6 +4,9 @@ import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Forecast, Mode, Run, Snapshot } from "../src/shared/types.js";
 import { forecast } from "../src/analysis/forecast.js";
+import { allocationEarnings } from "../src/analysis/earnings.js";
+import { shortlist } from "../src/analysis/shortlist.js";
+import { isFresh } from "../src/analysis/freshness.js";
 import { initialize, STORAGE_VERSION, version } from "./storage-schema.js";
 import { digest, RecordCodec } from "./storage-codec.js";
 export const databasePath = () =>
@@ -399,38 +402,50 @@ export class Store {
     );
     return [...new Map(parsed.map((f) => [f.id, f])).values()];
   }
-  latestForecasts(mode: Mode, includeRaw = true): Map<string, Forecast> {
-    const rows = this.latestRows("forecasts", mode);
-    return new Map(
-      rows.map((r) => {
-        const f = this.prediction(r, includeRaw);
-        return [f.poolId, f];
-      }),
-    );
-  }
   saveDecision(mode: Mode, now: number) {
-    const candidates = [...this.latestForecasts(mode, false).values()].filter(
-      (f) => f.madeAt <= now && now - f.madeAt < 3600 && f.input.active,
+    const rows = this.latestMarketInputs(mode).flatMap(
+      ({ snapshot, frozen }) =>
+        frozen &&
+        frozen.madeAt <= now &&
+        snapshot.active &&
+        isFresh(snapshot, now)
+          ? [
+              {
+                snapshot,
+                forecast: frozen,
+                aprChange: null,
+                allocationChange: null,
+              },
+            ]
+          : [],
     );
-    const choose = (
-      metric: (f: Forecast) => number | null,
-      filter = (f: Forecast) => f.input.active,
-    ) =>
-      candidates
-        .filter((f) => filter(f) && metric(f) !== null)
+    const estimates = new Map(
+      rows.map((row) => [
+        row.snapshot.id,
+        allocationEarnings(row, 1000, 0, now),
+      ]),
+    );
+    const screen = shortlist(rows, estimates, "all");
+    // A baseline is useful in the UI but does not represent a history-qualified pick.
+    const persistence = screen.qualified ? screen.visible[0].forecast.id : null;
+    const choose = (metric: (s: Snapshot) => number | null) =>
+      rows
+        .flatMap((row) => {
+          const score = metric(row.snapshot);
+          return score !== null && Number.isFinite(score)
+            ? [{ row, score }]
+            : [];
+        })
         .sort(
           (a, b) =>
-            (metric(b) ?? 0) - (metric(a) ?? 0) ||
-            a.poolId.localeCompare(b.poolId),
-        )[0]?.id ?? null;
+            b.score - a.score ||
+            a.row.snapshot.id.localeCompare(b.row.snapshot.id),
+        )[0]?.row.forecast.id ?? null;
     const choices = {
-      persistence: choose(
-        (f) => f.stressedPer1000,
-        (f) => f.basis === "history",
-      ),
-      highestApr: choose((f) => f.input.stakeApr),
-      highestRewards: choose((f) => f.input.rewards48hUsd),
-      highestFees: choose((f) => f.input.eligibleFees48hUsd),
+      persistence,
+      highestApr: choose((s) => s.stakeApr),
+      highestRewards: choose((s) => s.rewards48hUsd),
+      highestFees: choose((s) => s.eligibleFees48hUsd),
     };
     this.db
       .prepare("INSERT OR IGNORE INTO decisions VALUES(?,?,?,?)")

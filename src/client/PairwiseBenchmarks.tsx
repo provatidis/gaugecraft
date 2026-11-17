@@ -14,9 +14,11 @@ function difference(value: number | null) {
 
 export function PairwiseBenchmarks({
   comparisons,
+  shortlistAccuracy,
   total,
 }: {
   comparisons: ReturnType<typeof performanceSummary>["comparisons"];
+  shortlistAccuracy: ReturnType<typeof performanceSummary>["shortlistAccuracy"];
   total: number;
 }) {
   return (
@@ -41,6 +43,17 @@ export function PairwiseBenchmarks({
         </p>
       ) : (
         <>
+          {shortlistAccuracy.matched > 0 && (
+            <p className="benchmark-note">
+              In {shortlistAccuracy.matched} of {total} saved decisions, the
+              shortlist’s top pick had both a forecast and a complete outcome.
+              Its mean forecast before the stress adjustment was{" "}
+              <strong>{earningsMoney(shortlistAccuracy.forecast)}</strong> and
+              its mean observed earnings proxy was{" "}
+              <strong>{earningsMoney(shortlistAccuracy.observed)}</strong> per
+              1,000 additional power over 48 hours.
+            </p>
+          )}
           <div className="benchmark-pairs">
             {comparisons.map((row) => (
               <article key={row.key} className="benchmark-pair">

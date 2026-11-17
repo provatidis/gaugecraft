@@ -75,6 +75,26 @@ test("zero competition and zero revenue are valid; stress retains scheduled ince
   assert.equal(allocationEarnings(r, 1000).earnings, 50);
   assert.equal(allocationEarnings(r, 1000).stress, 50);
 });
+test("personal stress counts existing power once, reports when the historical floor binds and preserves legacy stress", () => {
+  const r = row(1000, 100);
+  r.forecast.projectedAllocation = 2000;
+  r.forecast.basis = "history";
+  r.forecast.medianAllocation48h = 5000;
+  const guarded = allocationEarnings(r, 300, 200);
+  assert.equal(guarded.returningStress, (300 / (4800 + 300)) * 50);
+  assert.equal(guarded.stressUsesMedian, true);
+  r.forecast.medianAllocation48h = 1000;
+  const projected = allocationEarnings(r, 300, 200);
+  assert.equal(projected.stress, (300 / (800 * 2 * 1.5 + 300)) * 50);
+  assert.equal(projected.stressUsesMedian, false);
+  delete r.forecast.medianAllocation48h;
+  const legacy = allocationEarnings(r, 300, 200);
+  assert.equal(legacy.returningStress, null);
+  assert.equal(legacy.stress, projected.stress);
+  assert.equal(guarded.stress, projected.stress);
+  assert.equal(projected.stress, projected.returningStress);
+  assert.equal(guarded.earnings, projected.earnings);
+});
 test("sorting separates evidence cohorts and keeps unavailable values last", () => {
   const baseline = allocationEarnings(row(), 1000);
   const history = { ...baseline, basis: "history" as const, earnings: 1 };
@@ -83,4 +103,18 @@ test("sorting separates evidence cohorts and keeps unavailable values last", () 
     assert.ok(compareEarnings(history, baseline, "earnings", descending) < 0);
     assert.ok(compareEarnings(baseline, partial, "earnings", descending) < 0);
   }
+});
+
+test("the latest observation needs priced fees even with a complete priced history or an older frozen estimate", () => {
+  const r = row();
+  const history = Array.from({ length: 97 }, (_, i) => ({
+    ...r.snapshot,
+    observedAt: t - (96 - i) * 1800,
+    retrievedAt: t - (96 - i) * 1800,
+  }));
+  r.snapshot.eligibleFees48hUsd = null;
+  history[96] = r.snapshot;
+  r.forecast.basis = "history"; // Earlier releases could freeze the recent median for this case.
+  assert.equal(allocationEarnings(r, 1000).earnings, null);
+  assert.equal(forecast(r.snapshot, history).projectedRevenue, null);
 });

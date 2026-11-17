@@ -1,7 +1,7 @@
 import { readFile, writeFile, rename } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { r2Storage, type ObjectStorage } from "./object-backup.js";
-import { BaseLpReader } from "./sources/base-lp.js";
+import { BaseLpReader, MAX_BLOCK_OFFSET_SECONDS } from "./sources/base-lp.js";
 import {
   DAY,
   WEEK,
@@ -119,15 +119,15 @@ export async function freeze(
   };
 }
 export async function score(
-  reader: BaseLpReader,
+  reader: Pick<BaseLpReader, "terms" | "counters">,
   frozen: Frozen,
   series: Point[],
 ): Promise<Decision> {
   const { point, decision } = frozen,
     end = series.at(-1)!;
   if (
-    Math.abs(series[0].at - point.at) > 2 ||
-    Math.abs(end.at - point.at - WEEK) > 3
+    Math.abs(series[0].at - (end.at - WEEK)) > MAX_BLOCK_OFFSET_SECONDS ||
+    Math.abs(end.at - point.at - WEEK) > MAX_BLOCK_OFFSET_SECONDS
   )
     throw new Error("Outcome horizon mismatch");
   series[0] = point;
@@ -157,8 +157,7 @@ export async function score(
       (opening.stable + opening.units * unitValues(pool, closing.sqrt).spot);
     if (c.mode === "hold")
       return { net: hold, edge: 0, hold, evidence: "token balances" };
-    const terms = endTerms[c.address];
-    if (!terms) return { ...missing, hold };
+    const terms = endTerms[c.address] ?? null;
     const q = quote(pool, c.width, point, series, terms, false, pair, opening);
     if (!q) return { ...missing, hold };
     const net = value(q, c.mode, 1000);
@@ -178,6 +177,7 @@ export async function score(
     ...decision,
     scoredAt: Math.floor(Date.now() / 1000),
     outcomeBlock: end.block,
+    outcomeAt: end.at,
     entries: decision.entries.map((e) => {
       const pick = evaluate(e.pick),
         apr = evaluate(e.headline);

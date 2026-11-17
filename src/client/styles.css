@@ -3469,3 +3469,26 @@ th .metric-help {
 .shortlist-metric:not(button) {
   cursor: default;
 }
+
+.shortlist-signals .competition-note {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 680px) {
+  .shortlist-signals {
+    display: block;
+    grid-column: 2 / -1;
+    grid-row: 3;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .shortlist-signals small {
+    display: none;
+  }
+  .shortlist-rows .inspect-pool {
+    grid-column: 4;
+    grid-row: 2;
+  }
+}

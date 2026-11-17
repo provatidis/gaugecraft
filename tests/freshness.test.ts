@@ -67,3 +67,9 @@ test("freshness respects the threshold and keeps synthetic fixtures explicit", (
   assert.equal(isFresh(demoSnapshot(now - 7 * 86400), now), true);
   assert.equal(dataHealth([], [8453], [], "live", now).newest, null);
 });
+
+test("retrieving an old source block again does not make its observations fresh", () => {
+  const s = row(8453, 4501).snapshot;
+  s.retrievedAt = now;
+  assert.equal(isFresh(s, now), false);
+});

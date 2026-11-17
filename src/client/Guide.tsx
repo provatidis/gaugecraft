@@ -35,8 +35,8 @@ const help: Record<ResearchPage, { title: string; paragraphs: string[] }> = {
   opportunities: {
     title: "When is this a persistence ranking?",
     paragraphs: [
-      "Insufficient history means there is not enough evidence to rank persistence. The initial list is a baseline comparison. Qualification needs roughly 48 hours, at least 80 priced fee observations, no gap over 75 minutes and a near-full fee window. Stale pools are excluded.",
-      "Qualified pools are ranked for the power selected in Markets, or 1,000 additional reference power, including your own dilution, under a 50% decline in forecast fees and 50% more competing power on top of projected allocation. Scheduled incentives retain their modeled value. This is a stress assumption, not a confidence interval. Simulate your own size; a larger allocation can change the ordering.",
+      "Pools need current data, priced fees and positive earnings to qualify. A history-based rank also needs at least 47½ hours of coverage, 80 priced fee readings, no collection gap over 75 minutes and a 47–49 hour fee window. When none qualify under standard stress, the list shows available full-window baselines.",
+      "The shortlist tests the same amount in each pool. Standard stress halves forecast fees and increases projected competing power by 50%. Choose “If allocators return” to test a return to the prior 48-hour median where it implies greater competition. Only pools with a recorded median can enter that comparison. Scheduled incentives run through expiry. Enter your own power because larger allocations can change the order.",
     ],
   },
   simulator: {
@@ -172,11 +172,20 @@ export function Guide({ navigate }: { navigate: Navigate }) {
         aria-labelledby="guide-principle-title"
       >
         <div>
-          <h2 id="guide-principle-title">Pool rewards ≠ your earnings</h2>
+          <h2 id="guide-principle-title">What are you choosing today?</h2>
           <p>
-            <b>Pool rewards are shared by all allocators.</b> Your earnings
-            depend on your share after dilution, revenue timing and competing
-            allocation.
+            Directing voting or staking power? Start with{" "}
+            <button
+              className="text-link"
+              onClick={() => navigate("opportunities")}
+            >
+              Opportunities
+            </button>
+            . Depositing tokens into a Base liquidity pool? Open{" "}
+            <button className="text-link" onClick={() => navigate("liquidity")}>
+              Provide liquidity
+            </button>{" "}
+            to compare a range with holding the same tokens.
           </p>
         </div>
         <div className="guide-formula">

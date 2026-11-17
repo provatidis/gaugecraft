@@ -145,3 +145,39 @@ test("invalid positions and inactive gauges fail closed", () => {
     null,
   );
 });
+
+test("delayed and expiring stakes retain whole streamed rewards and show share at activation", () => {
+  const program = {
+    ...p,
+    token: { ...p.token, decimals: 0 },
+    rateRaw: ((10n ** 18n + 21599n) / 21600n).toString(),
+    start: t,
+    end: t + HORIZON,
+  };
+  const s = { ...demoSnapshot(t), allocation: 0, programs: [program] };
+  const input = {
+    power: 1000,
+    existingPower: 0,
+    stakeValueUsd: null,
+    activationDelayHours: 6,
+    remainingDays: 1,
+  };
+  close(simulate(s, 0, input, SCENARIOS[0]).earnings, 3);
+  close(
+    simulate(
+      { ...s, allocation: 1000 },
+      0,
+      { ...input, activationDelayHours: 12 },
+      SCENARIOS[0],
+    ).share,
+    1 / 3,
+  );
+  const expired = simulate(
+    s,
+    0,
+    { ...input, activationDelayHours: 24 },
+    SCENARIOS[0],
+  );
+  close(expired.earnings, 0);
+  close(expired.share, 0);
+});

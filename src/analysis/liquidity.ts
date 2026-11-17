@@ -83,7 +83,7 @@ export interface Quote {
   aero: number | null;
   aeroTokens: number | null;
   aeroIssue: string | null;
-  inRange: number;
+  inRange: number | null;
   feeLimit: number;
   aeroLimit: number;
   feeApr: number | null;
@@ -121,12 +121,44 @@ export function exposure(a: number, b: number, low: number, high: number) {
     ) / Math.abs(b - a)
   );
 }
+function priceTick(sqrt: number) {
+  return (2 * Math.log(sqrt)) / Math.log(1.0001);
+}
+function sampleGrowth(
+  pool: Pool,
+  series: Point[],
+  shift: number,
+  lower: number,
+  upper: number,
+) {
+  const growth = [0, 0, 0];
+  let secondsInRange = 0;
+  for (let i = 1; i < series.length; i++) {
+    const before = series[i - 1].samples[pool.address],
+      after = series[i].samples[pool.address];
+    const dt = series[i].at - series[i - 1].at;
+    if (!before || !after || Math.abs(dt - 21600) > 120) return null;
+    const fraction = exposure(
+      priceTick(before.sqrt * shift),
+      priceTick(after.sqrt * shift),
+      lower,
+      upper,
+    );
+    secondsInRange += dt * fraction;
+    for (let j = 0; j < growth.length; j++) {
+      const delta = BigInt(after.growth[j]) - BigInt(before.growth[j]);
+      if (delta < 0n) return null;
+      growth[j] += (Number(delta) / 2 ** 128) * fraction;
+    }
+  }
+  return { growth, secondsInRange };
+}
 export function quote(
   pool: Pool,
   width: number,
   opening: Point,
   series: Point[],
-  terms: Terms,
+  terms: Terms | null,
   replay: boolean,
   inside?: [Counter, Counter],
   fixed?: Pick<Quote, "lower" | "upper">,
@@ -145,10 +177,9 @@ export function quote(
     Math.abs(last.at - first.at - WEEK) > 120
   )
     return null;
-  const tick = (sqrt: number) => (2 * Math.log(sqrt)) / Math.log(1.0001);
   const [lower, upper] = fixed
     ? [fixed.lower, fixed.upper]
-    : bounds(tick(start.sqrt), pool.spacing, width);
+    : bounds(priceTick(start.sqrt), pool.spacing, width);
   const shift = replay ? start.sqrt / from.sqrt : 1;
   const endSqrt = to.sqrt * shift;
   const begin = unitValues(pool, start.sqrt),
@@ -156,33 +187,16 @@ export function quote(
   const [raw0, raw1] = position(start.sqrt, lower, upper);
   const L = 1 / (raw0 * begin.v0 + raw1 * begin.v1);
   const [out0, out1] = position(endSqrt, lower, upper);
-  const totals = [0, 0, 0];
-  let time = 0;
-  for (let i = 1; i < series.length; i++) {
-    const before = series[i - 1].samples[pool.address],
-      after = series[i].samples[pool.address];
-    const dt = series[i].at - series[i - 1].at;
-    if (!before || !after || Math.abs(dt - 21600) > 120) return null;
-    const fraction = exposure(
-      tick(before.sqrt * shift),
-      tick(after.sqrt * shift),
-      lower,
-      upper,
+  const sampled = sampleGrowth(pool, series, shift, lower, upper);
+  let growth = sampled?.growth;
+  if (inside && !replay && stableCounters(inside, first, last, pool.address)) {
+    growth = inside[1].growth.map(
+      (value, i) =>
+        Number(BigInt(value) - BigInt(inside[0].growth[i])) / 2 ** 128,
     );
-    time += dt * fraction;
-    for (let j = 0; j < 3; j++) {
-      const delta = BigInt(after.growth[j]) - BigInt(before.growth[j]);
-      if (delta < 0n) return null;
-      totals[j] += (Number(delta) / 2 ** 128) * L * fraction;
-    }
   }
-  if (inside && stableCounters(inside, first, last, pool.address)) {
-    for (let j = 0; j < 3; j++)
-      totals[j] =
-        (Number(BigInt(inside[1].growth[j]) - BigInt(inside[0].growth[j])) /
-          2 ** 128) *
-        L;
-  }
+  if (!growth) return null;
+  const totals = growth.map((amount) => amount * L);
   const isEth = pool.asset === "WETH";
   const prices = [
     unitValues(pool, 1.0001 ** (lower / 2)).spot,
@@ -190,6 +204,7 @@ export function quote(
   ];
   const blocks = last.block - first.block;
   const rewardShare =
+    terms &&
     (!replay || terms.paying) &&
     terms.alive &&
     terms.referral !== null &&
@@ -223,18 +238,18 @@ export function quote(
         : null,
     aeroTokens,
     aeroIssue:
-      replay && !terms.paying
+      replay && terms && !terms.paying
         ? "No active AERO emissions at the decision block"
         : aeroTokens === null
           ? "Gauge reward terms unavailable"
           : rewardPrice === null
             ? "AERO price unavailable"
             : null,
-    inRange: time / (last.at - first.at),
+    inRange: sampled ? sampled.secondsInRange / (last.at - first.at) : null,
     feeLimit: (start.liquidity * 0.01) / L,
     aeroLimit: (start.staked * 0.01) / L,
-    feeApr: terms.feeApr,
-    aeroApr: terms.aeroApr,
+    feeApr: terms?.feeApr ?? null,
+    aeroApr: terms?.aeroApr ?? null,
   };
 }
 // On initialization the clock above a tick starts at zero. An older above-clock
@@ -274,6 +289,12 @@ export interface Choice {
   width: number;
   mode: Strategy;
 }
+// Match the precision and upper limit shown on Aero's pool list when breaking ties.
+export function displayApr(apr: number | null) {
+  return apr === null
+    ? null
+    : Math.min(9000, apr).toFixed(apr < 1 ? 2 : apr < 100 ? 1 : 0);
+}
 export function choices(
   quotes: Quote[],
   asset: PairName,
@@ -311,13 +332,9 @@ export function choices(
         apr: mode === "fees" ? q.feeApr : q.aeroApr,
       })),
     );
-  const displayed = (n: number | null) =>
-    n === null
-      ? -1
-      : Number(Math.min(9000, n).toFixed(n < 1 ? 2 : n < 100 ? 1 : 0));
   const ranked = aprOptions.sort(
     (a, b) =>
-      displayed(b.apr) - displayed(a.apr) ||
+      Number(displayApr(b.apr) ?? -1) - Number(displayApr(a.apr) ?? -1) ||
       a.q.address.localeCompare(b.q.address) ||
       a.mode.localeCompare(b.mode),
   );
@@ -353,6 +370,7 @@ export interface Decision {
   entries: Entry[];
   scoredAt?: number;
   outcomeBlock?: number;
+  outcomeAt?: number;
 }
 export interface PilotView {
   started: number | null;

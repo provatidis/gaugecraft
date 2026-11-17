@@ -140,3 +140,34 @@ test("expired observations, partial windows and invalid inputs cannot produce a 
     null,
   );
 });
+test("returning competition requires a measured median, applies before extra shocks and covers delayed activation", () => {
+  const row = fixture();
+  assert.match(
+    simulateAllocation(row, input, "returning", undefined, t).error!,
+    /48h voting power median/,
+  );
+  row.forecast.medianAllocation48h = 5000;
+  const stress = allocationEarnings(
+    row,
+    input.power,
+    input.existingPower,
+    t,
+  ).returningStress;
+  near(
+    simulateAllocation(row, input, "returning", undefined, t).earnings,
+    stress!,
+  );
+  const delayed = simulateAllocation(
+    row,
+    { ...input, activationDelayHours: 2 },
+    "returning",
+    SCENARIOS[2],
+    t,
+  );
+  near(delayed.earnings, ((300 / (4800 * 1.5 + 300)) * 50 * 46) / 48);
+  row.forecast.basis = "insufficient";
+  assert.equal(
+    simulateAllocation(row, input, "returning", undefined, t).earnings,
+    null,
+  );
+});

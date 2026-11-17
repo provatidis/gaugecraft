@@ -11,7 +11,15 @@ export const PERSISTENCE_REQUIREMENTS = {
   maxGapSeconds: 75 * 60,
   minPricedFees: 80,
   minFeeWindowSeconds: 47 * HOUR,
+  maxFeeWindowSeconds: 49 * HOUR,
 } as const;
+
+export function comparableFeeWindow(seconds: number) {
+  return (
+    seconds >= PERSISTENCE_REQUIREMENTS.minFeeWindowSeconds &&
+    seconds <= PERSISTENCE_REQUIREMENTS.maxFeeWindowSeconds
+  );
+}
 
 export function historyCoverage<T extends Pick<HistoryPoint, "observedAt">>(
   rows: T[],
@@ -52,6 +60,7 @@ export function persistenceCoverage(
   const pricedFeeCount = samples.filter(
     (s) => s.eligibleFees48hUsd !== null,
   ).length;
+  const supply = allocationCoverage(samples, snapshot.observedAt);
   const sourceWindowSeconds = snapshot.windowEnd - snapshot.windowStart;
   return {
     availableAt,
@@ -63,6 +72,7 @@ export function persistenceCoverage(
     spanSeconds: span * HOUR,
     maxGapSeconds: samples.length >= 2 ? maxGap : null,
     pricedFeeCount,
+    allocationCoverage: { count: supply.values.length, ready: supply.ready },
     sourceWindowSeconds,
     gaps: samples.slice(1).flatMap((s, i) => {
       const start = samples[i].observedAt;
@@ -74,6 +84,26 @@ export function persistenceCoverage(
     ready:
       ready &&
       pricedFeeCount >= PERSISTENCE_REQUIREMENTS.minPricedFees &&
-      sourceWindowSeconds >= PERSISTENCE_REQUIREMENTS.minFeeWindowSeconds,
+      comparableFeeWindow(sourceWindowSeconds),
+  };
+}
+
+// Missing supply between genuine observations must not establish a 48h median.
+export function allocationCoverage(samples: Snapshot[], end: number) {
+  const { samples: known, ready } = historyCoverage(
+    samples.filter(
+      (s) =>
+        s.allocation !== null &&
+        Number.isFinite(s.allocation) &&
+        s.allocation >= 0,
+    ),
+    end,
+  );
+  const span = known.length
+    ? known.at(-1)!.observedAt - known[0].observedAt
+    : 0;
+  return {
+    values: known.map((s) => s.allocation!),
+    ready: ready && span >= PERSISTENCE_REQUIREMENTS.minSpanSeconds,
   };
 }

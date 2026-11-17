@@ -54,6 +54,7 @@ interface SugarPool {
   windowFee1: bigint;
   unstakedFee: bigint;
 }
+export const MAX_BLOCK_OFFSET_SECONDS = 60;
 export interface Block {
   block: number;
   at: number;
@@ -111,7 +112,8 @@ export class BaseLpReader {
         rate = (next.at - b.at) / (next.block - b.block);
       b = next;
     }
-    if (Math.abs(closest.at - timestamp) <= 60) return closest;
+    if (Math.abs(closest.at - timestamp) <= MAX_BLOCK_OFFSET_SECONDS)
+      return closest;
     throw new Error(
       "Base checkpoint has no block within one minute of " + timestamp,
     );

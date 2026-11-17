@@ -39,6 +39,12 @@ export function performance(
   return {
     evaluations,
     decisions,
+    poolLabels: Object.fromEntries(
+      selected.map(({ poolId, input }) => [
+        poolId,
+        `${input.token0.symbol}/${input.token1.symbol} · ${input.chain}`,
+      ]),
+    ),
     scope:
       "Latest 250 pending and 500 mature forecasts, plus saved selections from the latest 100 mature collection cohorts.",
     totalStored: store.db

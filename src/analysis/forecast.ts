@@ -14,9 +14,14 @@ import {
   percentChange,
   sumKnown,
 } from "./math.js";
-import { historyCoverage, PERSISTENCE_REQUIREMENTS } from "./coverage.js";
+import {
+  allocationCoverage,
+  comparableFeeWindow,
+  historyCoverage,
+  PERSISTENCE_REQUIREMENTS,
+} from "./coverage.js";
 export { historyCoverage } from "./coverage.js";
-export const MODEL = "transparent-v1";
+export const MODEL = "transparent-v1.1";
 export function forecast(snapshot: Snapshot, history: Snapshot[]): Forecast {
   const madeAt = Math.max(snapshot.observedAt, snapshot.retrievedAt);
   // Explicit prediction cutoff. Future or other-pool observations never enter the model.
@@ -44,11 +49,13 @@ export function forecast(snapshot: Snapshot, history: Snapshot[]): Forecast {
   const growth = percentChange(snapshot.allocation, before?.allocation ?? null);
   const feeCv = cv(fees),
     aprCv = cv(aprs);
+  const supply = allocationCoverage(samples, snapshot.observedAt);
   const enough =
     ready &&
     fees.length >= PERSISTENCE_REQUIREMENTS.minPricedFees &&
-    snapshot.windowEnd - snapshot.windowStart >=
-      PERSISTENCE_REQUIREMENTS.minFeeWindowSeconds;
+    comparableFeeWindow(snapshot.windowEnd - snapshot.windowStart);
+  const medianAllocation48h =
+    enough && supply.ready ? median(supply.values) : null;
   // Rolling fees overlap: use them for level stability, not independent statistical samples.
   const level = enough
     ? median(
@@ -58,9 +65,9 @@ export function forecast(snapshot: Snapshot, history: Snapshot[]): Forecast {
       )
     : snapshot.eligibleFees48hUsd;
   const projectedFees =
-    level === null
+    level === null || snapshot.eligibleFees48hUsd === null
       ? null
-      : Math.min(level, snapshot.eligibleFees48hUsd ?? level);
+      : Math.min(level, snapshot.eligibleFees48hUsd);
   const scheduled = incentives(snapshot.programs, madeAt, madeAt + HORIZON);
   const revenue = sumKnown([projectedFees, scheduled]);
   // Extrapolate positive 6h inflow linearly for 48h, cap at +100%; never assume outflows benefit us.
@@ -119,6 +126,19 @@ export function forecast(snapshot: Snapshot, history: Snapshot[]): Forecast {
         : "Six-hour change is descriptive. Until the history gate passes, baseline holds allocation constant and stress tests show dilution.",
       severity: growth !== null && growth > 10 ? "warn" : "neutral",
     },
+    ...(medianAllocation48h !== null &&
+    allocation !== null &&
+    medianAllocation48h > allocation * 1.5
+      ? [
+          {
+            name: "Returning competition",
+            value: `${medianAllocation48h.toLocaleString("en-US", { maximumFractionDigits: 2 })} voting power`,
+            detail:
+              "In the optional returning competition scenario, the median voting power over the previous 48 hours exceeds 1.5× projected competition. A personal comparison removes your existing stake before adding your intended amount.",
+            severity: "warn" as const,
+          },
+        ]
+      : []),
     {
       name: "Incentive runway",
       value:
@@ -178,6 +198,7 @@ export function forecast(snapshot: Snapshot, history: Snapshot[]): Forecast {
     projectedFees,
     projectedIncentives: scheduled,
     projectedAllocation: allocation,
+    medianAllocation48h,
     stressedRevenue: stressed,
     expectedPer1000: per(revenue, allocation),
     stressedPer1000: per(
@@ -290,19 +311,27 @@ export function evaluateForecast(
     return result;
   }
   let earnings = 0;
+  let previousIncentives = 0;
   for (let i = 1; i < cover.length; i++) {
     const a = cover[i - 1],
       b = cover[i],
       left = Math.max(a.observedAt, f.madeAt),
       right = Math.min(b.observedAt, f.dueAt);
     if (right <= left) continue;
-    const share =
-      1000 / (((a.allocation as number) + (b.allocation as number)) / 2 + 1000);
-    const inc = incentives(end.programs, left, right);
-    if (inc === null)
+    // Interpolate the sampled supply at the midpoint of the part actually held.
+    const elapsed =
+      ((left + right) / 2 - a.observedAt) / (b.observedAt - a.observedAt);
+    const competitors =
+      a.allocation! + (b.allocation! - a.allocation!) * elapsed;
+    const share = 1000 / (competitors + 1000);
+    // Difference cumulative awards so token rounding is independent of the sampling cadence.
+    const cumulative = incentives(end.programs, f.madeAt, right);
+    if (cumulative === null)
       return incomplete(
         "An incentive amount could not be priced during the holding period.",
       );
+    const inc = cumulative - previousIncentives;
+    previousIncentives = cumulative;
     earnings +=
       share * ((end.eligibleFees48hUsd * (right - left)) / HORIZON + inc);
   }

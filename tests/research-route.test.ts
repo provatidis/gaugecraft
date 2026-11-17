@@ -72,3 +72,10 @@ test("two-pool comparison links restore the current selection without personal s
   );
   assert.equal(readRoute(`#markets?compare=${second}`).compareWith, "");
 });
+test("returning competition links restore the chosen shortlist or simulator scenario", () => {
+  for (const page of ["opportunities", "simulator"]) {
+    const route = readRoute(`#${page}?mode=demo&scenario=returning`);
+    assert.equal(route.scenario, "returning");
+    assert.deepEqual(readRoute(routeHash(route)), route);
+  }
+});

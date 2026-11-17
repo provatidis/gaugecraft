@@ -23,7 +23,7 @@ const rows = Array.from({ length: 97 }, (_, i) =>
   sample(t - 172800 + i * 1800),
 );
 
-test("readiness diagnostics preserve the exact existing forecast outputs", () => {
+test("valid legacy coverage fixtures preserve forecast values across the new model revision", () => {
   const s = sample(t);
   const parityRows = Array.from({ length: 97 }, (_, i) => ({
     ...s,
@@ -45,7 +45,22 @@ test("readiness diagnostics preserve the exact existing forecast outputs", () =>
     [s, [...parityRows, { ...s, observedAt: t + 1800, retrievedAt: t + 1800 }]],
   ];
   const hash = createHash("sha256")
-    .update(JSON.stringify(cases.map(([s, h]) => forecast(s, h))))
+    .update(
+      JSON.stringify(
+        cases.map(([s, h]) => {
+          const current = forecast(s, h);
+          assert.equal(current.model, "transparent-v1.1");
+          assert.ok(current.id.endsWith(":" + current.model));
+          // Compare the existing v1 fixture digest independently of the new ledger IDs.
+          return {
+            ...current,
+            medianAllocation48h: undefined,
+            id: current.id.replace(/:transparent-v1\.1$/, ":transparent-v1"),
+            model: "transparent-v1",
+          };
+        }),
+      ),
+    )
     .digest("hex");
   assert.equal(
     hash,
@@ -127,4 +142,34 @@ test("market coverage uses full stored history independently of chart requests a
   } finally {
     store.close();
   }
+});
+
+test("overlong fee windows fail both the history diagnostic and the forecast gate", () => {
+  const s = { ...sample(t), windowStart: t - 49 * 3600 - 1 };
+  assert.equal(persistenceCoverage(s, rows).ready, false);
+  assert.equal(forecast(s, rows).basis, "insufficient");
+});
+test("qualified supply observations must cover the window, including its endpoints and interior", () => {
+  for (const known of [
+    (i: number) => i === 96,
+    (i: number) => i >= 15,
+    (i: number) => i <= 81,
+    (i: number) => i < 35 || i > 40,
+  ]) {
+    const history = rows.map((s, i) => ({
+      ...s,
+      allocation: known(i) ? 1000 : null,
+    }));
+    const coverage = persistenceCoverage(sample(t), history);
+    assert.equal(coverage.ready, true);
+    assert.equal(coverage.allocationCoverage?.ready, false);
+    const f = forecast(sample(t), history);
+    assert.equal(f.basis, "history");
+    assert.equal(f.medianAllocation48h, null);
+  }
+  const observedZero = rows.map((s) => ({ ...s, allocation: 0 }));
+  assert.equal(
+    forecast({ ...sample(t), allocation: 0 }, observedZero).medianAllocation48h,
+    0,
+  );
 });

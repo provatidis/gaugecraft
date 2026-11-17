@@ -10,13 +10,20 @@ import {
   costs,
   exposure,
   stableCounters,
+  displayApr,
+  type Counter,
   pools,
   WEEK,
   type Terms,
   type Point,
   type Pool,
 } from "../src/analysis/liquidity.js";
-import { restoreLedger, verifyLedger } from "../server/lp-pilot.js";
+import {
+  restoreLedger,
+  verifyLedger,
+  score,
+  type Frozen,
+} from "../server/lp-pilot.js";
 const terms: Terms = {
   alive: true,
   paying: true,
@@ -111,6 +118,100 @@ test("growth modes, coverage, size and counter continuity", () => {
     ),
     false,
   );
+});
+test("a frozen fee choice uses verified range growth despite a missing intermediate sample and gauge terms", async () => {
+  const pool = pools[0],
+    series = tape(pool, 1900);
+  const point = series[0],
+    end = series.at(-1)!;
+  const opening = quote(pool, 8, point, series, terms, false)!;
+  const fees = { address: pool.address, width: 8, mode: "fees" } as const;
+  const key = pool.address + "-8";
+  const initial: Counter = {
+    above: [WEEK * 2, WEEK * 2],
+    growth: ["0", "0", "0"],
+  };
+  const closing: Counter = {
+    above: [WEEK * 3, WEEK * 2],
+    growth: [(2n ** 128n).toString(), "0", "0"],
+  };
+  end.samples[pool.address]!.growth = [...closing.growth];
+  const frozen: Frozen = {
+    point,
+    terms: { [pool.address]: terms },
+    counters: { [key]: initial },
+    decision: {
+      at: point.at,
+      published: point.at,
+      block: point.block,
+      hash: point.hash,
+      quotes: [opening],
+      entries: [
+        {
+          asset: pool.asset,
+          preset: "weekly",
+          pick: fees,
+          headline: { ...fees, mode: "aero" },
+        },
+      ],
+    },
+  };
+  const reader = {
+    async terms() {
+      return {};
+    },
+    async counters() {
+      return { [key]: closing };
+    },
+  };
+  const full = await score(reader, frozen, series);
+  series[1].samples[pool.address] = null;
+  const withGap = (await score(reader, frozen, series)).entries[0].score!;
+  assert.equal(withGap.pickEvidence, "range counters");
+  assert.ok(withGap.pickNet !== null && withGap.pickNet > 1000 - costs(1000));
+  assert.deepEqual(withGap, full.entries[0].score);
+  assert.equal(withGap.headlineNet, null);
+  const withoutCounters = await score(
+    {
+      ...reader,
+      async counters() {
+        return {};
+      },
+    },
+    frozen,
+    series,
+  );
+  assert.equal(withoutCounters.entries[0].score?.pickNet, null);
+  assert.ok(Math.abs(withoutCounters.entries[0].score!.hold! - 1000) < 1e-6);
+  const delayed = series.map((p) => ({ ...p, at: p.at + 30 }));
+  assert.equal((await score(reader, frozen, delayed)).outcomeAt, end.at + 30);
+  delayed.at(-1)!.at += 40;
+  await assert.rejects(score(reader, frozen, delayed), /horizon mismatch/);
+});
+test("the LP list and headline benchmark use the same capped displayed APR", () => {
+  assert.equal(displayApr(0.0371), "0.04");
+  assert.equal(displayApr(15.425), "15.4");
+  assert.equal(displayApr(200.45), "200");
+  assert.equal(displayApr(9500), "9000");
+  assert.equal(displayApr(null), null);
+  const qs = pools.slice(0, 2).map((pool) => {
+    const series = tape(pool, 1900);
+    return quote(
+      pool,
+      8,
+      series[0],
+      series,
+      { ...terms, feeApr: 9001, aeroApr: 9200 },
+      true,
+    )!;
+  });
+  const result = choices(qs, "WETH", "weekly", 1000);
+  assert.deepEqual(result.headline, {
+    address: [...qs].sort((a, b) => a.address.localeCompare(b.address))[0]
+      .address,
+    width: 8,
+    mode: "aero",
+  });
 });
 test("LP archive round trip restores independently and detects corruption", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lp-archive-"));

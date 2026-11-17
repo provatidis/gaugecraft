@@ -89,6 +89,7 @@ export interface Forecast {
   projectedFees: Maybe;
   projectedIncentives: Maybe;
   projectedAllocation: Maybe;
+  medianAllocation48h?: Maybe;
   stressedRevenue: Maybe;
   expectedPer1000: Maybe;
   stressedPer1000: Maybe;
@@ -108,6 +109,7 @@ export interface PersistenceCoverage {
   spanSeconds: number;
   maxGapSeconds: number | null;
   pricedFeeCount: number;
+  allocationCoverage?: { count: number; ready: boolean };
   sourceWindowSeconds: number;
   gaps: { start: number; end: number; seconds: number }[];
   ready: boolean;

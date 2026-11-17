@@ -79,7 +79,7 @@ export function SplitComparison({
       ? estimate
       : basis === "stress"
         ? stress
-        : calculate("current");
+        : calculate(basis);
   const mixed = second && second.forecast.basis !== row.forecast.basis;
   const basisText = (r: MarketRow) =>
     r.forecast.basis === "history"
@@ -246,9 +246,9 @@ export function SplitComparison({
                         </dl>
                         {result.total !== null && (
                           <p>
-                            {basis === "current" &&
+                            {(basis === "current" || basis === "returning") &&
                               result.advantage !== null &&
-                              `Split difference at current competition · ${differenceLabel(result.advantage)}. `}
+                              `${SCENARIO_LABELS[basis]} split difference · ${differenceLabel(result.advantage)}. `}
                             {name(row)} contributes{" "}
                             {earningsMoney(result.firstLeg.earnings)} and{" "}
                             {name(second)} contributes{" "}

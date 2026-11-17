@@ -1,12 +1,15 @@
 import type { MarketRow, Maybe } from "../shared/types.js";
 import { isFresh } from "./freshness.js";
-import { finite, HOUR } from "./math.js";
+import { comparableFeeWindow } from "./coverage.js";
+import { finite } from "./math.js";
 
 export type EarningsBasis = "history" | "baseline" | "partial" | "unavailable";
 export interface EarningsComparison {
   basis: EarningsBasis;
   earnings: Maybe;
   stress: Maybe;
+  returningStress?: Maybe;
+  stressUsesMedian?: boolean;
   fees: Maybe;
   incentives: Maybe;
   reason: string;
@@ -17,6 +20,22 @@ export const EVIDENCE_LABELS: Record<EarningsBasis, string> = {
   partial: "Partial fee window",
   unavailable: "Unavailable",
 };
+
+// The observed median includes all stakes. Assume the user's existing power was
+// present in that history and remove it once before adding their intended power.
+export function returningCompetition(
+  projectedOther: number,
+  medianAllocation: Maybe | undefined,
+  existingPower = 0,
+) {
+  if (
+    medianAllocation == null ||
+    !Number.isFinite(medianAllocation) ||
+    medianAllocation < 0
+  )
+    return null;
+  return Math.max(projectedOther * 1.5, medianAllocation - existingPower);
+}
 
 // An immediate, constant-power comparison at the forecast cutoff. Forecast records
 // remain immutable; personal inputs are used only by the client and are never saved there.
@@ -34,6 +53,7 @@ export function allocationEarnings(
     basis,
     earnings: null,
     stress: null,
+    returningStress: null,
     fees: null,
     incentives: null,
     reason,
@@ -51,15 +71,13 @@ export function allocationEarnings(
       "unavailable",
       "Check intended and existing allocation power",
     );
-  if (
-    s.windowEnd - s.windowStart < 47 * HOUR ||
-    s.windowEnd - s.windowStart > 49 * HOUR
-  )
+  if (!comparableFeeWindow(s.windowEnd - s.windowStart))
     return blocked(
       "partial",
       "A comparable 48h earnings estimate needs a near-full 48h fee window; short windows are not extrapolated.",
     );
   const values = [
+    s.eligibleFees48hUsd,
     s.allocation,
     f.projectedAllocation,
     f.projectedFees,
@@ -76,16 +94,26 @@ export function allocationEarnings(
   const growth =
     current > 0 ? Math.max(1, f.projectedAllocation! / current) : 1;
   const other = (current - existingPower) * growth;
+  const returningOther = returningCompetition(
+    other,
+    f.basis === "history" ? f.medianAllocation48h : null,
+    existingPower,
+  );
   const share = power / (other + power);
   const fees = finite(share * f.projectedFees!);
   const incentives = finite(share * f.projectedIncentives!);
+  const stressedEarnings = (competition: number) =>
+    finite(
+      (power / (competition + power)) *
+        (f.projectedFees! * 0.5 + f.projectedIncentives!),
+    );
   return {
     basis: f.basis === "history" ? "history" : "baseline",
     earnings: finite(share * (f.projectedFees! + f.projectedIncentives!)),
-    stress: finite(
-      (power / (other * 1.5 + power)) *
-        (f.projectedFees! * 0.5 + f.projectedIncentives!),
-    ),
+    stress: stressedEarnings(other * 1.5),
+    returningStress:
+      returningOther === null ? null : stressedEarnings(returningOther),
+    stressUsesMedian: returningOther !== null && returningOther > other * 1.5,
     fees,
     incentives,
     reason:
@@ -99,7 +127,7 @@ export function allocationEarnings(
 export function compareEarnings(
   a: EarningsComparison,
   b: EarningsComparison,
-  metric: "earnings" | "stress",
+  metric: "earnings" | "stress" | "returningStress",
   descending = true,
 ) {
   const order: Record<EarningsBasis, number> = {
@@ -109,8 +137,8 @@ export function compareEarnings(
     unavailable: 3,
   };
   if (a.basis !== b.basis) return order[a.basis] - order[b.basis];
-  const av = a[metric],
-    bv = b[metric];
+  const av = a[metric] ?? null,
+    bv = b[metric] ?? null;
   if (av === null && bv === null) return 0;
   if (av === null) return 1;
   if (bv === null) return -1;

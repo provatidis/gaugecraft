@@ -65,7 +65,11 @@ export function readRoute(
         ? compare
         : "",
     scenario:
-      scenario === "stress" || scenario === "current" ? scenario : "forecast",
+      scenario === "stress" ||
+      scenario === "current" ||
+      scenario === "returning"
+        ? scenario
+        : "forecast",
     market: {
       search: (params.get("q") ?? "").slice(0, 200),
       chain: (params.get("network") ?? "all").slice(0, 80),
@@ -86,7 +90,10 @@ export function routeHash(route: ResearchRoute) {
   const params = new URLSearchParams({ mode: route.mode });
   if (route.pool && ["analysis", "simulator"].includes(route.page))
     params.set("pool", route.pool);
-  if (route.page === "simulator" && route.scenario !== "forecast")
+  if (
+    (route.page === "simulator" && route.scenario !== "forecast") ||
+    (route.page === "opportunities" && route.scenario === "returning")
+  )
     params.set("scenario", route.scenario);
   if (route.page === "opportunities" && route.market.chain !== "all")
     params.set("network", route.market.chain);

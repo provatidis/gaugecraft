@@ -152,3 +152,49 @@ test("each benchmark uses only windows where its own pick and the shortlist both
     ),
   );
 });
+
+test("the observed proxy preserves whole-token stream rewards across half-hour samples", async () => {
+  const { demoSnapshot } = await import("../server/demo.js");
+  const { forecast, evaluateForecast } =
+    await import("../src/analysis/forecast.js");
+  const t = 1792656000,
+    s = demoSnapshot(t);
+  // One whole token per six hours, rounded at the contract's rate precision.
+  const program = {
+    ...s.programs![0],
+    token: { ...s.token0, decimals: 0 },
+    rateRaw: ((10n ** 18n + 21599n) / 21600n).toString(),
+    start: t,
+    end: t + 172800,
+    priceUsd: 1,
+  };
+  const history = Array.from({ length: 97 }, (_, i) => ({
+    ...demoSnapshot(t + i * 1800),
+    allocation: 1000,
+    eligibleFees48hUsd: 0,
+    programs: [program],
+  }));
+  const f = forecast(history[0], [history[0]]);
+  const result = evaluateForecast(f, history, t + 172800);
+  assert.equal(f.expectedPer1000, 4);
+  assert.equal(result.observedRevenueProxy, 8);
+  assert.equal(result.observedReturnProxy, 4);
+});
+
+test("shortlist calibration matches its own saved forecast with its own earning proxy", () => {
+  const reports = [
+    { ...evaluation("a", "proxy", 2), estimatedReturn: 10 },
+    { ...evaluation("b", "proxy", 0), estimatedReturn: 0 },
+    { ...evaluation("c", "insufficient"), estimatedReturn: 100 },
+    evaluation("missing-prediction", "proxy", 200),
+  ];
+  const decisions = reports.map((e, at) => ({
+    at,
+    choices: { persistence: e.forecastId, highestApr: null },
+  }));
+  assert.deepEqual(performanceSummary(reports, decisions).shortlistAccuracy, {
+    matched: 2,
+    forecast: 5,
+    observed: 1,
+  });
+});

@@ -117,6 +117,33 @@ test("an incomplete or stale second pool never becomes a zero-dollar split leg",
     assert.ok(result.secondLeg.error);
   }
 });
+test("each split leg independently applies its historical competition guard", () => {
+  const first = pool(0),
+    second = pool(1);
+  first.forecast.medianAllocation48h = 5000;
+  second.forecast.medianAllocation48h = 500;
+  first.forecast.basis = second.forecast.basis = "history";
+  const split = simulateSplit(
+    first,
+    second,
+    60,
+    budget,
+    200,
+    "returning",
+    time,
+  );
+  assert.equal(split.error, null);
+  assert.equal(split.firstOnly.earnings, (600 / (4900 + 600)) * 100);
+  assert.equal(
+    split.total,
+    (360 / (4900 + 360)) * 100 + (240 / (800 * 1.5 + 240)) * 100,
+  );
+  delete second.forecast.medianAllocation48h;
+  assert.equal(
+    simulateSplit(first, second, 60, budget, 200, "returning", time).total,
+    null,
+  );
+});
 
 test("unmatched windows, duplicate pools and incompatible networks or modes cannot be summed", () => {
   const first = pool(0);

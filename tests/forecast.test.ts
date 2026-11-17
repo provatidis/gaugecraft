@@ -51,6 +51,24 @@ test("coverage gaps and short source fee windows block persistence", () => {
     "insufficient",
   );
 });
+test("the optional scenario freezes past voting power without changing the recorded reference stress", () => {
+  const snapshot = { ...sample(t), allocation: 1e-18 };
+  const history = rows.map((s, i) => ({
+    ...s,
+    allocation: i < 70 ? 370000 : snapshot.allocation,
+  }));
+  const f = forecast(snapshot, history);
+  assert.equal(f.medianAllocation48h, 370000);
+  assert.equal(f.projectedAllocation, snapshot.allocation);
+  assert.equal(f.expectedPer1000, 100);
+  assert.equal(f.stressedPer1000, 50);
+  const unavailable = rows.map((s) => ({
+    ...s,
+    retrievedAt: t + 1,
+    allocation: 0,
+  }));
+  assert.deepEqual(forecast(snapshot, [...history, ...unavailable]), f);
+});
 test("frozen forecasts evaluate only after maturity and do not sum overlapping fees", () => {
   const f = forecast(sample(t), rows),
     future = Array.from({ length: 97 }, (_, i) => sample(t + i * 1800));

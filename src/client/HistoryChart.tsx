@@ -16,7 +16,7 @@ export default function HistoryChart({
   label,
   days,
 }: {
-  history: HistoryPoint[];
+  history: (HistoryPoint | Pick<HistoryPoint, "observedAt">)[];
   metric: keyof HistoryPoint;
   label: string;
   days: number;

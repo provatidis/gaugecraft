@@ -225,3 +225,48 @@ test("bounded performance samples retain the original picks when many pools shar
     db.close();
   }
 });
+
+test("frozen reference picks use current screen eligibility, including the 75-minute freshness limit", () => {
+  const db = new Store(":memory:");
+  try {
+    for (let i = 0; i <= 96; i++) {
+      const at = t + i * 1800;
+      db.ingest(
+        [0, 1].map((index) => ({
+          ...demoSnapshot(at, index),
+          mode: "live" as const,
+          allocation: 1000,
+          eligibleFees48hUsd: index === 0 ? 1000 : 10,
+          programs: [],
+          windowStart: at - (index === 0 ? 50 : 48) * 3600,
+        })),
+      );
+    }
+    const last = t + 96 * 1800;
+    const choicesAt = (decisionAt: number) => {
+      db.saveDecision("live", decisionAt);
+      return db.decisions("live", decisionAt + 48 * 3600)[0].choices;
+    };
+    const expected = db
+      .latestMarketInputs("live")
+      .find((x) => x.snapshot.id === demoSnapshot(last, 1).id)!.frozen!.id;
+    assert.equal(choicesAt(last).persistence, expected);
+    assert.equal(choicesAt(last + 65 * 60).persistence, expected);
+    assert.equal(choicesAt(last + 100 * 60).persistence, null);
+  } finally {
+    db.close();
+  }
+});
+
+test("a saved decision cannot use an older forecast when a newer observation is already available", () => {
+  const db = new Store(":memory:");
+  try {
+    db.ingest([demoSnapshot(t)]);
+    db.ingest([demoSnapshot(t + 1800)], false);
+    db.saveDecision("demo", t + 1801);
+    const choices = db.decisions("demo", t + 1801 + 48 * 3600)[0].choices;
+    assert.equal(choices.highestFees, null);
+  } finally {
+    db.close();
+  }
+});

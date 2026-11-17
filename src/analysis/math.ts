@@ -165,26 +165,34 @@ export function simulate(
     if (end < start + HORIZON) cuts.add(end);
   }
   const times = [...cuts].sort((a, b) => a - b);
+  const shareAt = (at: number) => {
+    const mine =
+      input.power *
+      (input.remainingDays === null
+        ? 1
+        : Math.max(0, 1 - (at - start) / (input.remainingDays * 86400)));
+    return mine + other > 0 ? mine / (mine + other) : 0;
+  };
+  let previousIncentives = 0;
   for (let i = 1; i < times.length; i++) {
     const a = times[i - 1],
       b = times[i],
       mid = (a + b) / 2;
     if (mid < start + delay) continue;
-    const mine =
-      input.power *
-      (input.remainingDays === null
-        ? 1
-        : Math.max(0, 1 - (mid - start) / (input.remainingDays * 86400)));
-    const share = mine + other > 0 ? mine / (mine + other) : 0;
+    const share = shareAt(mid);
     if (share === 0) continue;
-    const inc = incentives(snapshot.programs, a, b);
-    if (inc === null)
+    // Start the cumulative stream at activation so a pre-activation reward
+    // never enters the position and rounding does not depend on the grid.
+    const cumulative = incentives(snapshot.programs, start + delay, b);
+    if (cumulative === null)
       return {
         earnings: null,
         apr: null,
         share: null,
         error: "An active incentive token has no supported USD price.",
       };
+    const inc = cumulative - previousIncentives;
+    previousIncentives = cumulative;
     earnings +=
       share *
       ((feeForecast * (b - a)) / HORIZON + inc) *
@@ -193,7 +201,7 @@ export function simulate(
   return {
     earnings: finite(earnings),
     apr: annualized(earnings, input.stakeValueUsd),
-    share: input.power + other > 0 ? input.power / (input.power + other) : 0,
+    share: shareAt(start + delay),
     error: null,
   };
 }

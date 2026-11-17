@@ -1,5 +1,5 @@
 import type { MarketRow } from "../shared/types.js";
-import { allocationEarnings } from "./earnings.js";
+import { allocationEarnings, returningCompetition } from "./earnings.js";
 import {
   annualized,
   finite,
@@ -9,10 +9,11 @@ import {
   type SimulationInput,
 } from "./math.js";
 
-export type ScenarioBasis = "forecast" | "stress" | "current";
+export type ScenarioBasis = "forecast" | "stress" | "current" | "returning";
 export const SCENARIO_LABELS: Record<ScenarioBasis, string> = {
   forecast: "Markets estimate",
   stress: "Markets stress",
+  returning: "Returning competition",
   current: "Current competition",
 };
 
@@ -39,17 +40,35 @@ export function simulateAllocation(
       ? 1
       : Math.max(1, forecast.projectedAllocation! / snapshot.allocation!);
   const other = (snapshot.allocation! - input.existingPower) * growth;
-  const competition = (basis === "stress" ? 1.5 : 1) * (1 + shock.competition);
-  const fees = forecast.projectedFees! * (basis === "stress" ? 0.5 : 1);
+  const stressed = basis === "stress" || basis === "returning";
+  const scenarioOther =
+    basis === "returning"
+      ? returningCompetition(
+          other,
+          forecast.basis === "history" ? forecast.medianAllocation48h : null,
+          input.existingPower,
+        )
+      : stressed
+        ? other * 1.5
+        : other;
+  if (scenarioOther === null)
+    return {
+      earnings: null,
+      apr: null,
+      share: null,
+      error:
+        "This forecast needs a measured 48h voting power median for the returning competition scenario.",
+    };
+  const fees = forecast.projectedFees! * (stressed ? 0.5 : 1);
   const result = simulate(
     {
       ...snapshot,
       observedAt: forecast.madeAt,
-      allocation: other + input.existingPower,
+      allocation: scenarioOther + input.existingPower,
     },
     fees,
     input,
-    { ...shock, competition: competition - 1 },
+    shock,
   );
   if (
     result.error ||
@@ -59,7 +78,8 @@ export function simulateAllocation(
     return result;
   // With constant power, use the full scheduled incentive total once, avoiding
   // per-segment token rounding and matching Markets exactly.
-  const share = input.power / (other * competition + input.power);
+  const share =
+    input.power / (scenarioOther * (1 + shock.competition) + input.power);
   const earnings = finite(
     share * (fees + forecast.projectedIncentives!) * shock.revenueFactor,
   );

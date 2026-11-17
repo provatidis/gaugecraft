@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { PERSISTENCE_REQUIREMENTS as limits } from "../analysis/coverage.js";
+import {
+  comparableFeeWindow,
+  PERSISTENCE_REQUIREMENTS as limits,
+} from "../analysis/coverage.js";
 import type {
   MarketRow,
   PersistenceCoverage,
@@ -122,8 +125,8 @@ export function Coverage({ coverage }: { coverage?: PersistenceCoverage }) {
     {
       label: "Latest source fee window",
       value: duration(coverage.sourceWindowSeconds),
-      requirement: `At least ${duration(limits.minFeeWindowSeconds)}`,
-      passed: coverage.sourceWindowSeconds >= limits.minFeeWindowSeconds,
+      requirement: `${duration(limits.minFeeWindowSeconds)} to ${duration(limits.maxFeeWindowSeconds)}`,
+      passed: comparableFeeWindow(coverage.sourceWindowSeconds),
       help: "Actual duration returned by the protocol for the latest fee observation. Short launch windows are not scaled up to 48 hours.",
     },
   ];
@@ -176,6 +179,16 @@ export function Coverage({ coverage }: { coverage?: PersistenceCoverage }) {
         These checks always use 48 hours, independently of the chart range. They
         describe data coverage, not predictive accuracy.
       </p>
+      {coverage.allocationCoverage && (
+        <p className="coverage-explanation">
+          Returning competition needs 80 voting power observations across at
+          least 47h 30m with gaps of at most 75 minutes.{" "}
+          {coverage.allocationCoverage.count} observed.{" "}
+          {coverage.allocationCoverage.ready
+            ? "Voting power coverage is sufficient."
+            : "Voting power coverage is incomplete."}
+        </p>
+      )}
       {largest.length > 0 && (
         <details className="coverage-gaps">
           <summary>

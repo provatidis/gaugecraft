@@ -99,12 +99,35 @@ export function performanceSummary(
     else if (results.some((e) => !hasReturn(e))) cohorts.incomplete++;
     else paired.push(d);
   }
+  const selected = decisions.flatMap(({ choices }) => {
+    const outcome = byId.get(choices.persistence ?? "");
+    return hasReturn(outcome) &&
+      outcome.estimatedReturn !== null &&
+      Number.isFinite(outcome.estimatedReturn)
+      ? [
+          {
+            forecast: outcome.estimatedReturn,
+            observed: outcome.observedReturnProxy,
+          },
+        ]
+      : [];
+  });
+  const shortlistAccuracy = {
+    matched: selected.length,
+    forecast: selected.length
+      ? selected.reduce((sum, x) => sum + x.forecast, 0) / selected.length
+      : null,
+    observed: selected.length
+      ? selected.reduce((sum, x) => sum + x.observed, 0) / selected.length
+      : null,
+  };
   const due = evaluations.map((e) => e.dueAt);
   return {
     byId,
     counts,
     cohorts,
     paired,
+    shortlistAccuracy,
     comparisons: Object.keys(BENCHMARK_NAMES)
       .filter((key) => key !== "persistence")
       .map((key) => compareRule(key, decisions, byId)),

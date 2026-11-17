@@ -16,15 +16,17 @@ const manager = parseAbi([
   "struct Program { address token; uint256 amount; uint256 rate; uint48 start; uint48 end; address creator; }",
 ]);
 const voter = parseAbi(["function allocationCooldown() view returns(uint48)"]);
-const response = await globalThis.fetch(
-  "https://gaugecraft.sh/data/live/state.json",
-  {
-    signal: globalThis.AbortSignal.timeout(30000),
-    cache: "no-store",
-  },
-);
+const source =
+  process.env.GAUGECRAFT_STATE_URL ||
+  "https://gaugecraft-production.up.railway.app/api/state?view=overview";
+const response = await globalThis.fetch(source, {
+  signal: globalThis.AbortSignal.timeout(30000),
+  cache: "no-store",
+});
 if (!response.ok) throw new Error("Published observations unavailable");
 const state = await response.json();
+if (state.mode !== "live" || !state.markets?.length)
+  throw new Error("No live pools to verify");
 const pools = state.markets.map((r) => r.snapshot);
 const chosen = [];
 function take(
@@ -271,7 +273,7 @@ const report = {
   version: 1,
   verifiedAt: new Date().toISOString(),
   publishedAt: new Date(state.now * 1000).toISOString(),
-  source: "https://gaugecraft.sh/data/live/state.json",
+  source,
   method:
     "Independent contract reads pinned to each published snapshot block and hash; USD arithmetic recalculated with retained snapshot prices. No collector/database writes.",
   limitations: [

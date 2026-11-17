@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   choices,
+  displayApr,
   costs,
   DAY,
   presets,
@@ -221,9 +222,11 @@ export default function Liquidity({ refresh }: { refresh: number }) {
                 </p>
                 <p className="lp-note">
                   The scenario moves {asset} from {usd(q.spot)} to{" "}
-                  {usd(q.endSpot)} and estimates {Math.round(q.inRange * 100)}%
-                  of the week in range. Outside it, the position stops earning
-                  and can end up entirely in one token.
+                  {usd(q.endSpot)}{" "}
+                  {q.inRange !== null &&
+                    `and estimates ${Math.round(q.inRange * 100)}% of the week in range`}
+                  . Outside it, the position stops earning and can end up
+                  entirely in one token.
                 </p>
               </section>
               <details className="panel lp-details">
@@ -253,10 +256,9 @@ export default function Liquidity({ refresh }: { refresh: number }) {
                               <span>
                                 {modeName[m]}
                                 <small>
-                                  {(m === "fees"
-                                    ? r.feeApr
-                                    : r.aeroApr
-                                  )?.toFixed(1) ?? "—"}
+                                  {displayApr(
+                                    m === "fees" ? r.feeApr : r.aeroApr,
+                                  ) ?? "—"}
                                   % list-style APR
                                 </small>
                               </span>
@@ -357,6 +359,15 @@ export default function Liquidity({ refresh }: { refresh: number }) {
                         {usd(row.score.pickEdge)} · APR choice{" "}
                         {usd(row.score.headlineEdge)}
                       </span>
+                      {day.outcomeBlock && day.outcomeAt && (
+                        <a
+                          href={`https://basescan.org/block/${day.outcomeBlock}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Closing block · {date(day.outcomeAt)} ↗
+                        </a>
+                      )}
                       <small>
                         Pick {row.score.pickEvidence} · benchmark{" "}
                         {row.score.headlineEvidence}
