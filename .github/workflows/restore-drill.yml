@@ -1,5 +1,7 @@
 name: Verify the November 17 recovery copy
-on: workflow_dispatch
+on:
+  push:
+    branches: [recovery-drill/2026-11-17]
 permissions:
   contents: read
 jobs:
@@ -20,6 +22,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/drill-browser" playwright-core@1.56.1 --no-save --ignore-scripts
           VITE_DATA_MODE=api pnpm build
       - name: Restore the scheduled backup and verify its checksum and SQLite integrity
+        id: restore
         env:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
@@ -33,6 +36,7 @@ jobs:
       - name: Record recovered history and reproduce a saved decision
         run: node --import tsx scripts/drill-evidence.ts "$RUNNER_TEMP/drill.sqlite"
       - name: Verify Markets, Opportunities and Performance from the recovery copy
+        if: ${{ !cancelled() && steps.restore.outcome == 'success' }}
         env:
           DRILL_PLAYWRIGHT: ${{ runner.temp }}/drill-browser/node_modules/playwright-core/index.mjs
           DRILL_REPO: ${{ github.workspace }}
