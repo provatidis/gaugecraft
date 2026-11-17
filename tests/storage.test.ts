@@ -26,6 +26,10 @@ import {
   type ObjectStorage,
 } from "../server/object-backup.js";
 import { handler } from "../server/http.js";
+import {
+  PROSPECTIVE_GRACE,
+  PROSPECTIVE_START,
+} from "../src/shared/prospective.js";
 import { csvLines, toCsv } from "../server/csv.js";
 const t = 1792656000;
 function legacy(path: string, mismatched = false) {
@@ -329,6 +333,8 @@ test("hosted API remains read-only, distinguishes liveness from stale data, and 
       fetch(perfUrl),
     ]);
     const firstSample = await pending.json();
+    assert.equal(firstSample.prospective.nextAt, PROSPECTIVE_START);
+    assert.equal(firstSample.prospective.recorded, 0);
     assert.equal(firstSample.evaluations[0].status, "pending");
     assert.deepEqual(await concurrent.json(), firstSample);
     assert.equal(concurrent.headers.get("etag"), pending.headers.get("etag"));
@@ -403,6 +409,26 @@ test("hosted API remains read-only, distinguishes liveness from stale data, and 
     } finally {
       writer.close();
     }
+    // With no additional observations the live comparison must still expose an
+    // open slot and then its missed deadline. Older demo exports have no trial.
+    clock = PROSPECTIVE_START - 1;
+    const beforeTrial = await fetch(perfUrl);
+    clock = PROSPECTIVE_START;
+    const open = await fetch(perfUrl, {
+      headers: { "If-None-Match": beforeTrial.headers.get("etag")! },
+    });
+    assert.equal(open.status, 200);
+    assert.equal((await open.json()).prospective.slots[0].status, "open");
+    clock += PROSPECTIVE_GRACE;
+    const missed = await fetch(perfUrl, {
+      headers: { "If-None-Match": open.headers.get("etag")! },
+    });
+    assert.equal(missed.status, 200);
+    assert.equal((await missed.json()).prospective.missed, 1);
+    assert.equal(
+      (await (await fetch(`${perfUrl}?mode=demo`)).json()).prospective,
+      undefined,
+    );
     assert.equal(
       (
         await fetch(`${root}/api/state`, {

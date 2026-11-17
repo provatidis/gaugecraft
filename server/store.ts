@@ -8,6 +8,11 @@ import { allocationEarnings } from "../src/analysis/earnings.js";
 import { shortlist } from "../src/analysis/shortlist.js";
 import { isFresh } from "../src/analysis/freshness.js";
 import { initialize, STORAGE_VERSION, version } from "./storage-schema.js";
+import {
+  initializeProspective,
+  openProspectiveSlot,
+  freezeProspectiveSlot,
+} from "./prospective-store.js";
 import { digest, RecordCodec } from "./storage-codec.js";
 export const databasePath = () =>
   resolve(process.env.GAUGECRAFT_DB || "data/gaugecraft.sqlite");
@@ -27,6 +32,7 @@ export class Store {
           throw new Error("Unsupported read-only storage version");
       } else {
         initialize(this.db);
+        initializeProspective(this.db);
         this.db.exec("PRAGMA journal_mode=WAL");
       }
     } catch (error) {
@@ -409,6 +415,23 @@ export class Store {
     return [...new Map(parsed.map((f) => [f.id, f])).values()];
   }
   saveDecision(mode: Mode, now: number) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const bucket = Math.floor(now / 1800);
+      // A retry must not enroll a later view of an already frozen decision.
+      if (
+        !this.db
+          .prepare("SELECT 1 FROM decisions WHERE mode=? AND bucket=?")
+          .get(mode, bucket)
+      )
+        this.freezeDecision(mode, now, bucket);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  private freezeDecision(mode: Mode, now: number, bucket: number) {
     const rows = this.latestMarketInputs(mode).flatMap(
       ({ snapshot, frozen }) =>
         frozen &&
@@ -454,8 +477,20 @@ export class Store {
       highestFees: choose((s) => s.eligibleFees48hUsd),
     };
     this.db
-      .prepare("INSERT OR IGNORE INTO decisions VALUES(?,?,?,?)")
-      .run(mode, Math.floor(now / 1800), now, JSON.stringify(choices));
+      .prepare("INSERT INTO decisions VALUES(?,?,?,?)")
+      .run(mode, bucket, now, JSON.stringify(choices));
+    const slot = mode === "live" ? openProspectiveSlot(this.db, now) : null;
+    if (!slot) return;
+    const returning = shortlist(rows, estimates, "all", true);
+    const trialChoices = {
+      ...choices,
+      returning: returning.qualified ? returning.visible[0].forecast.id : null,
+    };
+    const ids = new Set(Object.values(trialChoices));
+    const picks = rows
+      .filter((row) => ids.has(row.forecast.id))
+      .map((row) => row.forecast);
+    freezeProspectiveSlot(this.db, slot, now, trialChoices, picks);
   }
   decisions(mode: Mode, now = Math.floor(Date.now() / 1000)) {
     return this.db

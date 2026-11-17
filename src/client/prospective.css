@@ -1,0 +1,96 @@
+.prospective {
+  margin-bottom: 18px;
+  overflow-wrap: anywhere;
+}
+.prospective-progress,
+.prospective-body,
+.prospective-detail {
+  padding: 10px 20px;
+}
+.prospective-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 14px;
+  border-block: 1px solid var(--line);
+  background: var(--surface-raised);
+  font-variant-numeric: tabular-nums;
+}
+.prospective-progress span,
+.prospective p,
+.prospective-picks {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.prospective-body:empty {
+  display: none;
+}
+.prospective-body p,
+.prospective-detail p {
+  margin: 4px 0;
+}
+.prospective-body strong,
+.prospective-picks dd span {
+  color: var(--foreground);
+}
+.prospective-detail {
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.prospective summary {
+  color: var(--accent);
+  cursor: pointer;
+}
+.prospective-detail > p,
+.prospective-holds {
+  margin-top: 12px;
+}
+.prospective-comparisons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr));
+  gap: 8px 16px;
+}
+.prospective-comparisons article,
+.prospective-holds li + li {
+  border-top: 1px solid var(--line);
+}
+.prospective-comparisons article {
+  padding-top: 10px;
+}
+.prospective-comparisons h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.prospective-holds {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 0;
+}
+.prospective-holds li {
+  padding-block: 6px;
+}
+.prospective-picks {
+  margin: 6px 0;
+}
+.prospective-picks div {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.4fr) 1fr;
+  gap: 8px;
+  padding: 3px 0;
+}
+.prospective-picks dd {
+  margin: 0;
+}
+.prospective-picks small {
+  display: block;
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .prospective-progress,
+  .prospective-body,
+  .prospective-detail {
+    padding-inline: 14px;
+  }
+}

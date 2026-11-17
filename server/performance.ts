@@ -2,6 +2,7 @@ import { evaluateForecast } from "../src/analysis/forecast.js";
 import type { Forecast, Mode } from "../src/shared/types.js";
 import type { Store } from "./store.js";
 import { feeTapeReader } from "./fee-tape-evidence.js";
+import { prospectivePerformance } from "./prospective-performance.js";
 
 export function performance(
   store: Store,
@@ -41,6 +42,9 @@ export function performance(
   return {
     evaluations,
     decisions,
+    ...(mode === "live"
+      ? { prospective: prospectivePerformance(store, now, completed) }
+      : {}),
     poolLabels: Object.fromEntries(
       selected.map(({ poolId, input }) => [
         poolId,

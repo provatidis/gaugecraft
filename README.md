@@ -38,6 +38,14 @@ An internet connection is required to load observations. Installation adds no ba
 
 6. **Review the reasoning, then evaluate it later.** Return to your watchlist and compare fee changes, incentive runway and incoming allocation before revising an assumption. After forecast windows mature, use **Performance** to see whether revenue was overestimated or allocation pressure underestimated. For each benchmark, Performance shows the shortlist and benchmark means over their matched 48-hour windows and explains excluded windows. Read the sample size beside each result. For saved Base WETH/USDC CL50 picks, Performance can recover a short fee window using verified opening and closing pool counters. The benchmark shows how many matches used those counters, and each affected ledger entry identifies its blocks. Expand the four-way comparison to hold the cohort constant across all strategies. These are observed-data return proxies for a standard reference allocation, not a record of your actual positions or claims. Collection gaps can leave a mature forecast unevaluable; waiting longer does not recreate missing observations.
 
+### The 30-hold comparison
+
+The live Performance page tracks whether choosing a pool under **Returning competition** improves earnings over choosing the default top pool. Both use 1,000 additional voting power across all networks and the same observations available at decision time. The comparison also freezes the highest eligible fees, highest estimated rewards and highest stake APR picks.
+
+The first entry window opens November 17, 2026 at 22:00 UTC. Subsequent windows open every 48 hours, for 30 scheduled slots in total. Within each two-hour window the collector saves the first eligible decision whose frozen forecast periods clear the previous enrolled hold. Each pool’s 48 hours begin at its own frozen forecast time. A missing choice stays empty. A missed window counts toward the 30 and cannot be filled later.
+
+Allow 45 minutes after the latest selected forecast matures for its closing observation. Performance reports matched outcomes and missing evidence for each pair. Wins, median differences and worst differences use holds where the two rules picked different pools. Same-pool selections appear separately. All earnings use Gaugecraft’s observed-data proxy, including its assumptions about fee timing and sampled competing power. The trial uses the existing collector, SQLite backup and historical fee-read budget.
+
 ### Read the estimates in context
 
 | Display                               | What it means                                                                                                                                                       | How to use it                                                                                                             |

@@ -7,6 +7,8 @@ import {
   feeTapeWorker,
 } from "../server/fee-tape-evidence.js";
 import { Store } from "../server/store.js";
+import { freezeProspectiveSlot } from "../server/prospective-store.js";
+import { PROSPECTIVE_START } from "../src/shared/prospective.js";
 import { HORIZON } from "../src/analysis/math.js";
 import type { Snapshot } from "../src/shared/types.js";
 
@@ -19,10 +21,10 @@ const observed = (t: number, i = 0): Snapshot => ({
   blockHash: "0x" + t.toString(16).padStart(64, "0"),
   retrievedAt: t + 20,
 });
-function seed(db: Store, aligned = false, index = 0) {
-  const start = observed(origin, index),
-    closing = observed(origin + HORIZON, index),
-    next = observed(origin + HORIZON + 1800, index);
+function seed(db: Store, aligned = false, index = 0, at = origin) {
+  const start = observed(at, index),
+    closing = observed(at + HORIZON, index),
+    next = observed(at + HORIZON + 1800, index);
   if (!aligned) next.windowStart += 2 * 3600;
   db.ingest([start]);
   db.ingest([closing, next], false);
@@ -51,6 +53,39 @@ const point = (s: Snapshot) => ({
   fee0: s.block,
   fee1: "0",
   lastSwapAt: s.observedAt,
+});
+
+test("mature trial picks can obtain missing fee evidence outside the rolling decision sample", async () => {
+  const db = new Store(":memory:");
+  try {
+    const { selected, start, closing } = seed(db, false, 0, PROSPECTIVE_START);
+    freezeProspectiveSlot(
+      db.db,
+      { slot: 0, previousEnd: null },
+      selected.madeAt,
+      {
+        persistence: null,
+        returning: selected.id,
+        highestApr: null,
+        highestFees: null,
+        highestRewards: null,
+      },
+      [selected],
+    );
+    const work = feeTapeWorker(db, {
+      supports: () => true,
+      read: async (s) => point(s),
+    });
+    const signal = new AbortController().signal;
+    assert.equal((await work(selected.dueAt - 1, signal)).reads, 0);
+    const after = selected.dueAt + 7 * 86400;
+    assert.deepEqual(db.decisions("live", after), []);
+    assert.equal((await work(after, signal)).added, 2);
+    assert.deepEqual(feeTapeReader(db.db)(start), point(start));
+    assert.deepEqual(feeTapeReader(db.db)(closing), point(closing));
+  } finally {
+    db.close();
+  }
 });
 test("historical evidence reads only unaligned saved selections, deduplicates blocks and survives worker restart", async () => {
   const db = new Store(":memory:");

@@ -30,6 +30,12 @@ export function money(value: Maybe | undefined, compact = false) {
 }
 export const earningsMoney = (value: Maybe | undefined) =>
   value == null ? "—" : cents.format(value);
+export function earningsDifference(value: Maybe) {
+  if (value === null) return "—";
+  if (value === 0) return "$0.00";
+  const amount = Math.abs(value);
+  return `${amount < 0.005 ? "< $0.01" : earningsMoney(amount)} ${value > 0 ? "higher" : "lower"}`;
+}
 export const number = (value: Maybe | undefined, compact = false) =>
   value == null ? "—" : (compact ? compactUnits : units).format(value);
 export const pct = (value: Maybe | undefined) =>

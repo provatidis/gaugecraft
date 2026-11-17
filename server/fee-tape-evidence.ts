@@ -7,6 +7,7 @@ import {
   feeTapeBounds,
 } from "../src/analysis/fee-window.js";
 import type { Store } from "./store.js";
+import { prospectiveEntries } from "./prospective-store.js";
 
 function hasFeeTape(db: DatabaseSync) {
   return !!db
@@ -61,7 +62,7 @@ export function feeTapeWorker(store: Store, source: FeeTapeSource) {
   const save = store.db
     .prepare(`INSERT INTO fee_tape_points(pool_id,block_hash,tape,fee0,fee1,last_swap_at)
     VALUES(?,?,?,?,?,?) ON CONFLICT(pool_id,block_hash) DO NOTHING`);
-  // Decisions fall out of this bounded working set as the Performance sample advances.
+  // Keep frozen trial picks eligible even after the rolling Performance sample advances.
   const after = new Map<string, number>();
   const chainRetry = new Map<number, { at: number; failures: number }>();
 
@@ -70,9 +71,11 @@ export function feeTapeWorker(store: Store, source: FeeTapeSource) {
     signal: AbortSignal,
     paused: () => boolean = () => false,
   ) {
+    const maturedTrial = prospectiveEntries(store.db).filter(
+      (entry) => entry.dueAt <= now,
+    );
     const selected = new Set(
-      store
-        .decisions("live", now)
+      [...store.decisions("live", now), ...maturedTrial]
         .flatMap((d) => Object.values(d.choices))
         .filter((id): id is string => !!id),
     );

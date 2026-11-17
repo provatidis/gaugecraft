@@ -2,15 +2,8 @@ import {
   BENCHMARK_NAMES,
   type performanceSummary,
 } from "../analysis/performance-summary.js";
-import { earningsMoney } from "./format.js";
+import { earningsDifference, earningsMoney } from "./format.js";
 import "./benchmarks.css";
-
-function difference(value: number | null) {
-  if (value === null) return "—";
-  if (value === 0) return "$0.00";
-  const amount = Math.abs(value);
-  return `${amount < 0.005 ? "< $0.01" : earningsMoney(amount)} ${value > 0 ? "higher" : "lower"}`;
-}
 
 export function PairwiseBenchmarks({
   comparisons,
@@ -79,7 +72,7 @@ export function PairwiseBenchmarks({
                   </div>
                   <div>
                     <dt>Shortlist difference</dt>
-                    <dd>{difference(row.meanDifference)}</dd>
+                    <dd>{earningsDifference(row.meanDifference)}</dd>
                   </div>
                 </dl>
                 {row.matched > 0 && (

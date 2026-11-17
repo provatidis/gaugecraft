@@ -12,6 +12,8 @@ import { Store } from "./store.js";
 import { markets, overviewRows, poolCoverage } from "./markets.js";
 import { performance } from "./performance.js";
 import { feeTapeRevision } from "./fee-tape-evidence.js";
+import { prospectiveEntries } from "./prospective-store.js";
+import { nextProspectiveChange } from "./prospective-performance.js";
 import { csvLines } from "./csv.js";
 import { configuredChains } from "./collector.js";
 import { dataHealth } from "../src/analysis/freshness.js";
@@ -149,8 +151,9 @@ export function handler(
   >();
   const inFlight = new Map<Mode, Promise<StateBody>>();
   async function performanceBody(mode: Mode): Promise<StateBody> {
-    const rev = `${revision()}:${decisionRevision.get()!.id}:${mode === "live" ? feeTapeRevision(store.db) : 0}`;
     const now = clock();
+    // A live trial entry commits in the same transaction as its normal decision.
+    const rev = `${revision()}:${decisionRevision.get()!.id}:${mode === "live" ? feeTapeRevision(store.db) : 0}`;
     const old = evaluations.get(mode);
     if (old && old.revision === rev && now >= old.from && now < old.until)
       return old.body;
@@ -161,7 +164,12 @@ export function handler(
       await previous.catch(() => {});
       return performanceBody(mode);
     }
-    const until = Number(nextEvaluation.get({ mode, now })!.at ?? Infinity);
+    const until = Math.min(
+      Number(nextEvaluation.get({ mode, now })!.at ?? Infinity),
+      mode === "live"
+        ? nextProspectiveChange(prospectiveEntries(store.db), now)
+        : Infinity,
+    );
     const body =
       options.database === ":memory:"
         ? Promise.resolve(representation(performance(store, mode, now)))

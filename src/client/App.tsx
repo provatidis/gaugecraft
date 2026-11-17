@@ -20,6 +20,8 @@ import {
   performanceSummary,
 } from "../analysis/performance-summary.js";
 import { PairwiseBenchmarks } from "./PairwiseBenchmarks.js";
+import { ProspectiveComparisonPanel } from "./ProspectiveComparisonPanel.js";
+import type { ProspectiveView } from "../shared/prospective.js";
 import { get, assetUrl, exportUrl, hosted } from "./data.js";
 import { dataHealth, isFresh } from "../analysis/freshness.js";
 import {
@@ -2644,6 +2646,7 @@ function Simulator({
   );
 }
 interface PerformanceData {
+  prospective?: ProspectiveView | null;
   evaluations: Evaluation[];
   decisions: { at: number; choices: Record<string, string | null> }[];
   poolLabels?: Record<string, string>;
@@ -2695,6 +2698,9 @@ function Performance({
   const currentPage = Math.min(page, pages - 1);
   return (
     <>
+      {mode === "live" && data.prospective && (
+        <ProspectiveComparisonPanel view={data.prospective} />
+      )}
       <PairwiseBenchmarks
         comparisons={summary.comparisons}
         shortlistAccuracy={summary.shortlistAccuracy}
