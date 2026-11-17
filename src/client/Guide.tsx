@@ -1,12 +1,23 @@
 import { assetUrl } from "./data.js";
 
 export type ResearchPage =
-  "markets" | "opportunities" | "analysis" | "simulator" | "performance";
+  | "markets"
+  | "opportunities"
+  | "analysis"
+  | "simulator"
+  | "performance"
+  | "liquidity";
 
 type Navigate = (page: ResearchPage) => void;
 
 // Adapted from README's research routine. Keep calculation details in SOURCES.md.
 const help: Record<ResearchPage, { title: string; paragraphs: string[] }> = {
+  liquidity: {
+    title: "Which pool should I use for a token deposit?",
+    paragraphs: [
+      "Provide liquidity compares WETH/USDC and cbBTC/USDC positions on Base. Choose your deposit size and check-in frequency to compare swap fees, AERO rewards and holding the same starting tokens. The result includes the price range and estimated entry and exit costs.",
+    ],
+  },
   markets: {
     title: "Pool rewards are shared. How do I estimate my earnings?",
     paragraphs: [

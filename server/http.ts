@@ -103,6 +103,7 @@ export function handler(
     collectorEnabled: boolean;
     database: string;
     backup?: BackupStatus;
+    liquidity?: () => import("../src/analysis/liquidity.js").PilotView;
     now?: () => number;
     development?: (req: IncomingMessage, res: ServerResponse) => void;
   },
@@ -301,6 +302,18 @@ export function handler(
             error: backup?.error ?? null,
           },
         });
+        return;
+      }
+      if (url.pathname === "/api/liquidity") {
+        send(
+          200,
+          options.liquidity?.() ?? {
+            started: null,
+            latest: null,
+            history: [],
+            restoredAt: null,
+          },
+        );
         return;
       }
       if (url.pathname === "/api/state") {

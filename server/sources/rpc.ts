@@ -23,9 +23,14 @@ export class Rpc {
   constructor(
     url: string,
     private interval = 200,
+    onRequest?: () => void,
   ) {
     this.client = createPublicClient({
-      transport: http(url, { timeout: 20000, retryCount: 0 }),
+      transport: http(url, {
+        timeout: 20000,
+        retryCount: 0,
+        onFetchRequest: onRequest,
+      }),
     });
   }
   async retry<T>(fn: () => Promise<T>): Promise<T> {

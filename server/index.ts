@@ -4,6 +4,7 @@ import { databasePath, Store } from "./store.js";
 import { scheduleCollector } from "./collector.js";
 import { scheduleBackups } from "./backup-scheduler.js";
 import { restoreFromObjects } from "./object-backup.js";
+import { schedulePilot } from "./lp-pilot.js";
 import { handler } from "./http.js";
 const path = databasePath();
 try {
@@ -37,6 +38,12 @@ const hosts = [
 ].filter((h): h is string => !!h);
 if (process.env.RAILWAY_ENVIRONMENT_ID) hosts.push("healthcheck.railway.app");
 const backups = await scheduleBackups(path);
+const pilot = schedulePilot(
+  path,
+  process.env.COLLECT !== "0" &&
+    (!process.env.CHAINS || process.env.CHAINS.split(",").includes("8453")),
+  () => backups.status.running,
+);
 const server = createServer(
   handler(store, {
     hosts,
@@ -44,6 +51,7 @@ const server = createServer(
     collectorEnabled: process.env.COLLECT !== "0",
     database: path,
     backup: backups.status,
+    liquidity: pilot.view,
     development: vite ? (req, res) => vite.middlewares(req, res) : undefined,
   }),
 );
@@ -65,7 +73,13 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
       server.close(() => resolve()),
     );
     server.closeIdleConnections();
-    await Promise.all([stop(), backups.stop(), drained, vite?.close()]);
+    await Promise.all([
+      stop(),
+      pilot.stop(),
+      backups.stop(),
+      drained,
+      vite?.close(),
+    ]);
     store.close();
     clearTimeout(deadline);
   });

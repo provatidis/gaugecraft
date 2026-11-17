@@ -28,6 +28,7 @@ export interface ResearchRoute {
 }
 const pages: Page[] = [
   "markets",
+  "liquidity",
   "opportunities",
   "analysis",
   "simulator",

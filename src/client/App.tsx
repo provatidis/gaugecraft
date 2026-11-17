@@ -47,6 +47,7 @@ import {
   type ScenarioBasis,
 } from "./research-route.js";
 import { ContextHelp, GettingStarted, Guide } from "./Guide.js";
+const Liquidity = React.lazy(() => import("./Liquidity.js"));
 const HistoryChart = React.lazy(() => import("./HistoryChart.js"));
 // A tab can outlive the deployment that supplied its chart chunk.
 class ChartBoundary extends React.Component<React.PropsWithChildren> {
@@ -154,6 +155,7 @@ const metricInfo: Record<string, string> = {
 const nav = [
   ["opportunities", "↗", "Opportunities"],
   ["markets", "◫", "Markets"],
+  ["liquidity", "◈", "Provide liquidity"],
   ["analysis", "⌁", "Pool analysis"],
   ["simulator", "⊞", "Simulator"],
   ["performance", "▥", "Performance"],
@@ -202,6 +204,7 @@ export default function App() {
     scrollTarget,
   } = useResearchRoute(savedMode);
   const { mode, page, pool: selected } = route;
+  const lp = page === "liquidity";
   const now = useObservationClock();
   const marketScroll = useRef({ top: 0, left: 0 });
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -258,6 +261,7 @@ export default function App() {
   }
   const showGuide = () => navigate("guide");
   useEffect(() => {
+    if (lp) return;
     const abort = new AbortController();
     let alive = true;
     setLoading(true);
@@ -302,7 +306,7 @@ export default function App() {
       window.removeEventListener("online", resume);
       document.removeEventListener("visibilitychange", resume);
     };
-  }, [mode, refresh]);
+  }, [mode, refresh, lp]);
   const rows = useMemo(
     () => (state?.mode === mode ? state.markets : []),
     [state, mode],
@@ -404,6 +408,7 @@ export default function App() {
               <span className="mobile-nav-label">
                 {
                   {
+                    liquidity: "Liquidity",
                     markets: "Markets",
                     opportunities: "Shortlist",
                     analysis: "Analyze",
@@ -477,20 +482,22 @@ export default function App() {
                 timeZone: "UTC",
               })}
             </span>
-            <select
-              aria-label="Data source mode"
-              value={mode}
-              onChange={(e) => setMode(e.target.value as Mode)}
-            >
-              <option value="live">Live observations</option>
-              <option value="demo">Sample fixtures</option>
-            </select>
+            {!lp && (
+              <select
+                aria-label="Data source mode"
+                value={mode}
+                onChange={(e) => setMode(e.target.value as Mode)}
+              >
+                <option value="live">Live observations</option>
+                <option value="demo">Sample fixtures</option>
+              </select>
+            )}
             <button
-              className={`icon-button ${loading ? "refreshing" : ""}`}
+              className={`icon-button ${!lp && loading ? "refreshing" : ""}`}
               title="Refresh observations"
               aria-label="Refresh observations"
-              aria-busy={loading}
-              disabled={loading}
+              aria-busy={!lp && loading}
+              disabled={!lp && loading}
               onClick={() => setRefresh((r) => r + 1)}
             >
               ↻
@@ -498,13 +505,13 @@ export default function App() {
           </div>
         </header>
         <main>
-          {mode === "demo" && (
+          {!lp && mode === "demo" && (
             <div className="notice demo">
               <b>Sample fixtures</b> Every pool, metric and historical
               observation in this view is synthetic. This is not live Aero data.
             </div>
           )}
-          {error && (
+          {!lp && error && (
             <div className="notice danger" role="alert">
               {error} {state ? "Showing the last loaded observations." : ""}
             </div>
@@ -523,7 +530,7 @@ export default function App() {
                 </button>
               </div>
             )}
-          {stale && (
+          {!lp && stale && (
             <div className="notice warning">
               <b>
                 {health.stalePools}{" "}
@@ -537,32 +544,38 @@ export default function App() {
           )}
           <div className="page-heading">
             <div>
-              <div className="eyebrow">AERO PREDICTIVE ALLOCATION</div>
+              <div className="eyebrow">
+                {lp ? "AERODROME · BASE" : "AERO PREDICTIVE ALLOCATION"}
+              </div>
               <h1 ref={heading} tabIndex={-1}>
-                {page === "guide"
-                  ? "How to use Gaugecraft"
-                  : page === "markets"
-                    ? "Allocation markets"
-                    : page === "opportunities"
-                      ? "Allocation opportunities"
-                      : page === "analysis"
-                        ? "Pool analysis"
-                        : page === "simulator"
-                          ? "Allocation simulator"
-                          : "Forecast performance"}
+                {lp
+                  ? "Provide liquidity"
+                  : page === "guide"
+                    ? "How to use Gaugecraft"
+                    : page === "markets"
+                      ? "Allocation markets"
+                      : page === "opportunities"
+                        ? "Allocation opportunities"
+                        : page === "analysis"
+                          ? "Pool analysis"
+                          : page === "simulator"
+                            ? "Allocation simulator"
+                            : "Forecast performance"}
               </h1>
               <p>
-                {page === "guide"
-                  ? "A short path from headline APR to an informed allocation scenario."
-                  : page === "markets"
-                    ? "Browse the pool directory by token, network or address. Star pools to revisit them."
-                    : page === "opportunities"
-                      ? "Compare 48-hour earnings for your stake."
-                      : page === "analysis"
-                        ? "A record of what was observable, with each estimate kept in context."
-                        : page === "simulator"
-                          ? "Test your power in one pool or compare a split across two pools on the same network."
-                          : "Frozen forecasts, observed outcomes, and simple benchmarks."}
+                {lp
+                  ? "Compare a seven-day liquidity position with holding the tokens you would deposit."
+                  : page === "guide"
+                    ? "A short path from headline APR to an informed allocation scenario."
+                    : page === "markets"
+                      ? "Browse the pool directory by token, network or address. Star pools to revisit them."
+                      : page === "opportunities"
+                        ? "Compare 48-hour earnings for your stake."
+                        : page === "analysis"
+                          ? "A record of what was observable, with each estimate kept in context."
+                          : page === "simulator"
+                            ? "Test your power in one pool or compare a split across two pools on the same network."
+                            : "Frozen forecasts, observed outcomes, and simple benchmarks."}
               </p>
             </div>
             {page === "markets" && (
@@ -580,39 +593,43 @@ export default function App() {
               </a>
             )}
           </div>
-          <div className="freshness" role="status">
-            <span className={`status-dot ${last && healthy ? "" : "amber"}`} />
-            <b>
-              {mode === "demo"
-                ? "Fixture dataset"
-                : last
-                  ? "Onchain observations"
-                  : loading
-                    ? "Loading observations…"
-                    : "No retrieval available"}
-            </b>
-            <span>{last ? `Latest retrieval ${date(last)}` : ""}</span>
-            {mode === "live" && state && (
+          {!lp && (
+            <div className="freshness" role="status">
               <span
-                className={`health-pill ${healthy ? "" : "attention"}`}
-                title={
-                  health.oldest
-                    ? `Oldest retained pool observation: ${date(health.oldest)}. Current means every pool observation on a network is within 75 minutes.`
-                    : "Waiting for successful collection."
-                }
-              >
-                {health.currentNetworks}/{health.networks.length} networks
-                current
-                {health.issues > 0
-                  ? ` · ${health.issues} collection ${health.issues === 1 ? "issue" : "issues"}`
-                  : ""}
+                className={`status-dot ${last && healthy ? "" : "amber"}`}
+              />
+              <b>
+                {mode === "demo"
+                  ? "Fixture dataset"
+                  : last
+                    ? "Onchain observations"
+                    : loading
+                      ? "Loading observations…"
+                      : "No retrieval available"}
+              </b>
+              <span>{last ? `Latest retrieval ${date(last)}` : ""}</span>
+              {mode === "live" && state && (
+                <span
+                  className={`health-pill ${healthy ? "" : "attention"}`}
+                  title={
+                    health.oldest
+                      ? `Oldest retained pool observation: ${date(health.oldest)}. Current means every pool observation on a network is within 75 minutes.`
+                      : "Waiting for successful collection."
+                  }
+                >
+                  {health.currentNetworks}/{health.networks.length} networks
+                  current
+                  {health.issues > 0
+                    ? ` · ${health.issues} collection ${health.issues === 1 ? "issue" : "issues"}`
+                    : ""}
+                </span>
+              )}
+              <span className="freshness-end">
+                48h horizon <span>·</span>{" "}
+                {hosted ? "Scheduled snapshots" : "30 min collection"}
               </span>
-            )}
-            <span className="freshness-end">
-              48h horizon <span>·</span>{" "}
-              {hosted ? "Scheduled snapshots" : "30 min collection"}
-            </span>
-          </div>
+            </div>
+          )}
           {page === "markets" && !guideDismissed && (
             <GettingStarted
               onGuide={showGuide}
@@ -622,7 +639,8 @@ export default function App() {
               }}
             />
           )}
-          {page !== "guide" &&
+          {!lp &&
+            page !== "guide" &&
             page !== "markets" &&
             page !== "opportunities" && (
               <ContextHelp page={page} onGuide={showGuide} />
@@ -669,7 +687,11 @@ export default function App() {
               </label>
             </AllocationSize>
           )}
-          {page === "guide" ? (
+          {lp ? (
+            <React.Suspense fallback={<p>Loading liquidity research…</p>}>
+              <Liquidity refresh={refresh} />
+            </React.Suspense>
+          ) : page === "guide" ? (
             <Guide navigate={navigate} />
           ) : loading && !state ? (
             <div className="loading">
@@ -794,7 +816,7 @@ export default function App() {
               Read the methodology ↗
             </a>
           </footer>
-          {state && (
+          {!lp && state && (
             <details className="source-health">
               <summary>
                 Data health ·{" "}
