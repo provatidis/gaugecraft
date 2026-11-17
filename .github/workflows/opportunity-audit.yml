@@ -1,0 +1,53 @@
+name: Audit frozen opportunity outcomes
+on:
+  push:
+    branches: [analysis/opportunity-outcomes-2026-11-17]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install pinned dependencies
+        run: |
+          npm install --global pnpm@11.25.0
+          pnpm install --frozen-lockfile
+      - name: Read the scheduled recovery copy into isolated storage
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: node --import tsx server/object-backup-cli.ts restore backups/2026-11-17T13-35-06.993Z-nnTKQC "$RUNNER_TEMP/archived.sqlite"
+      - name: Grade original saved choices and verify missing historical Base fee readings
+        env:
+          AUDIT_DECISIONS_THROUGH: '1794947578'
+        run: node --import tsx scripts/gca-history.ts "$RUNNER_TEMP/archived.sqlite" "$RUNNER_TEMP/history.json" --base-rpc
+      - name: Compare against published results and include the last seven hours of maturities
+        run: |
+          curl --fail --retry 3 -sS 'https://gaugecraft-production.up.railway.app/api/performance?mode=live' -o "$RUNNER_TEMP/public.json"
+          python3 scripts/gca-merge.py "$RUNNER_TEMP/public.json" "$RUNNER_TEMP/history.json" "$RUNNER_TEMP/combined.json" 563351a99baaedafb0cbad5b6cc7f1142d52e2032d3cde5a2249040b42b6c333
+      - name: Compare each predeclared schedule and review the biggest missed pick
+        run: |
+          python3 scripts/gca-stats.py "$RUNNER_TEMP/combined.json" "$RUNNER_TEMP/stats.json" --compact
+          node --import tsx scripts/gca-forensics.ts "$RUNNER_TEMP/archived.sqlite" "$RUNNER_TEMP/combined.json" "$RUNNER_TEMP/stats.json" > "$RUNNER_TEMP/forensics.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          tmp = Path(os.environ["RUNNER_TEMP"])
+          stats = json.loads((tmp / "stats.json").read_text())
+          for key, entry in stats.items():
+              if key=="phases":
+                  for phase in entry: print("AUDIT_PHASE",json.dumps(phase,separators=(",",":")))
+              else: print("AUDIT_SUM",json.dumps([key,entry],separators=(",",":")))
+          info = json.loads((tmp / "forensics.json").read_text())
+          print("AUDIT_CASES",json.dumps(info["worsts"],separators=(",",":")))
+          for k,v in info["details"].items(): print("AUDIT_CASE",json.dumps([k,v],separators=(",",":")))
+          PY
