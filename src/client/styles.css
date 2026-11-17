@@ -3405,10 +3405,8 @@ th .metric-help {
     padding: 8px;
   }
   .page-opportunities .allocation-size > div {
-    grid-column: 1 / -1;
-  }
-  .page-opportunities .allocation-size > div p {
-    margin-bottom: 0;
+    align-self: end;
+    padding-bottom: 4px;
   }
   .page-opportunities .allocation-size select {
     width: 100%;
@@ -3490,5 +3488,18 @@ th .metric-help {
   .shortlist-rows .inspect-pool {
     grid-column: 4;
     grid-row: 2;
+  }
+}
+
+@media (min-width: 681px) and (max-width: 1239px) {
+  .shortlist-signals {
+    display: block;
+    grid-column: 2 / -1;
+    grid-row: 2;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .shortlist-signals small {
+    margin-left: 8px;
   }
 }

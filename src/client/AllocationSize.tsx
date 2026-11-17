@@ -36,7 +36,9 @@ export function AllocationSize({
               ? "Each row uses 1,000 additional power"
               : "Each row uses your full allocation power"}
         </b>
-        <p>Enter the allocation power shown for your sAERO stake.</p>
+        {showAssumptions && (
+          <p>Enter the allocation power shown for your sAERO stake.</p>
+        )}
       </div>
       {!reference && (
         <button className="text-link" onClick={() => onChange("")}>

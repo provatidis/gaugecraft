@@ -577,7 +577,7 @@ export default function App() {
                     : page === "markets"
                       ? "Browse the pool directory by token, network or address. Star pools to revisit them."
                       : page === "opportunities"
-                        ? "Enter your allocation power to rank pools for the next 48 hours. Open a stress amount to test the assumptions."
+                        ? "Compare 48-hour earnings for your sAERO power."
                         : page === "analysis"
                           ? "A record of what was observable, with each estimate kept in context."
                           : page === "simulator"
@@ -1743,7 +1743,7 @@ function Opportunities({
             ) : choosing ? (
               "Choose one pool, then a second on the same network to test a split."
             ) : ranked ? (
-              `${count} of ${screen.tracked} tracked pools qualify. Showing the top ${screen.visible.length} by ${returning ? "earnings if allocators return" : "stress earnings"}.`
+              `Top ${screen.visible.length} of ${count} qualifying pools · ${screen.tracked} tracked.`
             ) : count ? (
               `Showing ${screen.visible.length} of ${count} baselines by estimated earnings. No pool in this selection qualifies for a history-based ranking.`
             ) : (
@@ -1827,20 +1827,17 @@ function Opportunities({
           {ranked
             ? returning
               ? "Fees fall 50%. Competition uses the higher of standard stress and its prior 48-hour median."
-              : "Stress halves forecast fees and increases projected competing power by 50%."
-            : "Baselines hold current fees and competing power steady. Their persistence is untested."}{" "}
-          {choosing
-            ? ranked
-              ? "History-based estimates."
-              : "Full-window baselines."
-            : "Open an amount to simulate it."}
+              : "Stress assumes 50% lower fees and 50% more competing power."
+            : "Baselines hold current fees and competing power steady. Their persistence is untested."}
         </div>
       )}
       <ol
         className="shortlist-rows"
         aria-label={
           ranked
-            ? "Pools ranked by stress earnings"
+            ? returning
+              ? "Pools ranked by earnings if allocators return"
+              : "Pools ranked by stress earnings"
             : "Baseline pool comparisons"
         }
       >
