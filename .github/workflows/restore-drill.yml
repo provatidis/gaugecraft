@@ -1,4 +1,4 @@
-name: Verify the November 17 recovery copy
+name: Rebuild a Base fee comparison after isolated recovery
 on:
   push:
     branches: [recovery-drill/2026-11-17]
@@ -19,8 +19,6 @@ jobs:
         run: |
           npm install --global pnpm@11.25.0
           pnpm install --frozen-lockfile
-          npm install --prefix "$RUNNER_TEMP/drill-browser" playwright-core@1.56.1 --no-save --ignore-scripts
-          VITE_DATA_MODE=api pnpm build
       - name: Restore the scheduled backup and verify its checksum and SQLite integrity
         id: restore
         env:
@@ -33,13 +31,8 @@ jobs:
           node --import tsx server/object-backup-cli.ts restore backups/2026-11-17T13-35-06.993Z-nnTKQC "$RUNNER_TEMP/drill.sqlite"
           echo "Restore and integrity check took $(($(date -u +%s) - $(cat "$RUNNER_TEMP/recovery-start"))) seconds."
           date -u +%T
-      - name: Record recovered history and reproduce a saved decision
-        run: node --import tsx scripts/drill-evidence.ts "$RUNNER_TEMP/drill.sqlite"
-      - name: Verify Markets, Opportunities and Performance from the recovery copy
-        if: ${{ !cancelled() && steps.restore.outcome == 'success' }}
-        env:
-          DRILL_PLAYWRIGHT: ${{ runner.temp }}/drill-browser/node_modules/playwright-core/index.mjs
-          DRILL_REPO: ${{ github.workspace }}
+      - name: Rebuild the two Base fee records on a scratch copy and independently replay the result
         run: |
-          DRILL_CHROME="$(command -v google-chrome)" node scripts/drill-views.mjs "$RUNNER_TEMP/drill.sqlite"
-          echo "Total from restore start through browser and benchmark verification: $(($(date -u +%s) - $(cat "$RUNNER_TEMP/recovery-start"))) seconds."
+          cp --reflink=auto "$RUNNER_TEMP/drill.sqlite" "$RUNNER_TEMP/base-replay.sqlite"
+          node --import tsx scripts/drill-base.ts "$RUNNER_TEMP/base-replay.sqlite"
+          node --import tsx scripts/drill-evidence.ts "$RUNNER_TEMP/base-replay.sqlite"
