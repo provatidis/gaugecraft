@@ -1,6 +1,6 @@
 # Gaugecraft
 
-[Open the dashboard](https://gaugecraft.sh/) · [Source repository](https://github.com/provatidis/gaugecraft)
+[Open the dashboard](https://gaugecraft.sh/) · [Share Gaugecraft](https://gaugecraft.sh/share.html) · [Source repository](https://github.com/provatidis/gaugecraft)
 
 A read-only research workspace for Aero MetaDEX03 predictive allocation and a Base liquidity pilot, available on GitHub Pages or locally. Compare pool rewards, inspect incentive expiry, model your share after dilution, and collect evidence about whether an APR persists.
 
